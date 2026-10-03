@@ -2880,6 +2880,7 @@ name = "roku-remote-rs"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "image",
  "quick-xml 0.36.2",
  "reqwest",
 ]

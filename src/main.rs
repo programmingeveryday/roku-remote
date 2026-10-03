@@ -1,4 +1,5 @@
 use eframe::egui;
+use std::collections::HashMap;
 use std::fs;
 use std::net::{SocketAddr, TcpStream, UdpSocket};
 use std::path::PathBuf;
@@ -18,6 +19,23 @@ pub struct AppItem {
     pub id: String,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct MediaPlayerInfo {
+    pub state: String, // "play", "pause", "buffer", "none"
+    pub app_name: String,
+    pub position_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct DeviceDetails {
+    pub model_name: String,
+    pub model_number: String,
+    pub software_version: String,
+    pub network_name: String,
+    pub power_mode: String,
+    pub ui_resolution: String,
+}
+
 enum BackgroundMessage {
     DeviceDiscovered(RokuDevice),
     DeviceNameUpdated(String),
@@ -25,6 +43,9 @@ enum BackgroundMessage {
     AppsListUpdated(Vec<AppItem>),
     ScanFinished,
     ThemeUpdated(ThemeColors),
+    MediaPlayerUpdated(MediaPlayerInfo),
+    DeviceDetailsUpdated(DeviceDetails),
+    AppIconLoaded { id: String, image: egui::ColorImage },
 }
 
 #[derive(Clone, Debug)]
@@ -125,7 +146,12 @@ struct RokuRemoteApp {
     selected_device_ip: String,
     device_name: String,
     active_app: String,
+    media_player: MediaPlayerInfo,
+    device_details: DeviceDetails,
+    show_device_info: bool,
     apps: Vec<AppItem>,
+    app_textures: HashMap<String, egui::TextureHandle>,
+    pending_icons: Vec<(String, egui::ColorImage)>,
     is_scanning: bool,
     status_text: String,
     show_shortcuts: bool,
@@ -153,7 +179,12 @@ impl RokuRemoteApp {
             selected_device_ip: "192.168.0.108".to_string(),
             device_name: "Roku Streaming Stick Plus".to_string(),
             active_app: "Loading...".to_string(),
+            media_player: MediaPlayerInfo::default(),
+            device_details: DeviceDetails::default(),
+            show_device_info: false,
             apps: default_popular_apps(),
+            app_textures: HashMap::new(),
+            pending_icons: Vec::new(),
             is_scanning: false,
             status_text: "Ready".to_string(),
             show_shortcuts: false,
@@ -283,6 +314,7 @@ impl RokuRemoteApp {
             }
             thread::sleep(Duration::from_millis(800));
             update_active_app_worker(&ip, &tx, &ctx);
+            update_media_player_worker(&ip, &tx, &ctx);
         });
     }
 
@@ -300,6 +332,7 @@ impl RokuRemoteApp {
             }
             thread::sleep(Duration::from_millis(1000));
             update_active_app_worker(&ip, &tx, &ctx);
+            update_media_player_worker(&ip, &tx, &ctx);
         });
     }
 
@@ -310,7 +343,20 @@ impl RokuRemoteApp {
         thread::spawn(move || {
             update_device_name_worker(&ip, &tx, &ctx);
             update_active_app_worker(&ip, &tx, &ctx);
+            update_media_player_worker(&ip, &tx, &ctx);
             update_apps_worker(&ip, &tx, &ctx);
+        });
+    }
+
+    fn fetch_app_icons(&self, apps: &[AppItem]) {
+        let ip = self.selected_device_ip.clone();
+        let tx = self.tx.clone();
+        let ctx = self.ctx.clone();
+        let apps_clone = apps.to_vec();
+        thread::spawn(move || {
+            for app in apps_clone {
+                load_app_icon_worker(&ip, &app.id, &tx, &ctx);
+            }
         });
     }
 
@@ -334,6 +380,7 @@ impl RokuRemoteApp {
                 }
                 BackgroundMessage::AppsListUpdated(apps) => {
                     if !apps.is_empty() {
+                        self.fetch_app_icons(&apps);
                         self.apps = apps;
                     }
                 }
@@ -345,6 +392,28 @@ impl RokuRemoteApp {
                     Self::apply_theme(ctx, &theme);
                     self.theme = theme;
                 }
+                BackgroundMessage::MediaPlayerUpdated(info) => {
+                    self.media_player = info;
+                }
+                BackgroundMessage::DeviceDetailsUpdated(details) => {
+                    self.device_details = details;
+                }
+                BackgroundMessage::AppIconLoaded { id, image } => {
+                    self.pending_icons.push((id, image));
+                }
+            }
+        }
+
+        // Convert pending ColorImages to egui Textures on UI thread
+        if !self.pending_icons.is_empty() {
+            let pending = std::mem::take(&mut self.pending_icons);
+            for (id, img) in pending {
+                let texture = ctx.load_texture(
+                    format!("app_icon_{}", id),
+                    img,
+                    egui::TextureOptions::LINEAR,
+                );
+                self.app_textures.insert(id, texture);
             }
         }
     }
@@ -487,7 +556,7 @@ impl RokuRemoteApp {
             let cols = ((avail_w / min_card_w).floor() as usize).max(2);
             let spacing = 6.0;
             let btn_w = ((avail_w - (spacing * (cols as f32 - 1.0))) / (cols as f32)).max(75.0);
-            let btn_h = 42.0;
+            let btn_h = 46.0;
 
             egui::Grid::new("apps_grid")
                 .spacing([spacing, spacing])
@@ -495,14 +564,6 @@ impl RokuRemoteApp {
                 .max_col_width(btn_w)
                 .show(ui, |ui| {
                     for (i, app) in self.apps.iter().enumerate() {
-                        let label = egui::Label::new(
-                            egui::RichText::new(&app.name)
-                                .size(12.0)
-                                .color(self.theme.foreground)
-                        )
-                        .wrap_mode(egui::TextWrapMode::Wrap)
-                        .selectable(false);
-
                         let (rect, response) = ui.allocate_exact_size(
                             egui::vec2(btn_w, btn_h),
                             egui::Sense::click(),
@@ -520,13 +581,40 @@ impl RokuRemoteApp {
                             visuals.bg_stroke,
                         );
 
-                        let text_rect = rect.shrink2(egui::vec2(4.0, 2.0));
+                        let inner_rect = rect.shrink2(egui::vec2(4.0, 3.0));
+                        let has_icon = self.app_textures.contains_key(&app.id);
+
                         let mut child_ui = ui.new_child(
                             egui::UiBuilder::new()
-                                .max_rect(text_rect)
-                                .layout(egui::Layout::centered_and_justified(egui::Direction::TopDown)),
+                                .max_rect(inner_rect)
+                                .layout(egui::Layout::left_to_right(egui::Align::Center)),
                         );
-                        child_ui.add(label);
+
+                        if let Some(texture) = self.app_textures.get(&app.id) {
+                            child_ui.image((texture.id(), egui::vec2(28.0, 28.0)));
+                            child_ui.add_space(4.0);
+                        }
+
+                        let text_w = if has_icon { inner_rect.width() - 34.0 } else { inner_rect.width() };
+                        let label = egui::Label::new(
+                            egui::RichText::new(&app.name)
+                                .size(11.5)
+                                .color(self.theme.foreground)
+                        )
+                        .wrap_mode(egui::TextWrapMode::Wrap)
+                        .selectable(false);
+
+                        child_ui.allocate_ui_with_layout(
+                            egui::vec2(text_w, inner_rect.height()),
+                            if has_icon {
+                                egui::Layout::left_to_right(egui::Align::Center)
+                            } else {
+                                egui::Layout::centered_and_justified(egui::Direction::TopDown)
+                            },
+                            |ui| {
+                                ui.add(label);
+                            },
+                        );
 
                         if (i + 1) % cols == 0 {
                             ui.end_row();
@@ -562,7 +650,107 @@ fn update_device_name_worker(ip: &str, tx: &Sender<BackgroundMessage>, ctx: &egu
                 if let Some(name) = parse_device_name_xml(&text) {
                     let cleaned = clean_html_entities(&name);
                     let _ = tx.send(BackgroundMessage::DeviceNameUpdated(cleaned));
-                    ctx.request_repaint();
+                }
+                let details = parse_device_details_xml(&text);
+                let _ = tx.send(BackgroundMessage::DeviceDetailsUpdated(details));
+                ctx.request_repaint();
+            }
+        }
+    }
+}
+
+fn parse_device_details_xml(xml: &str) -> DeviceDetails {
+    let extract = |tag: &str| -> String {
+        let open = format!("<{}>", tag);
+        let close = format!("</{}>", tag);
+        if let Some(start) = xml.find(&open) {
+            let s = start + open.len();
+            if let Some(end) = xml[s..].find(&close) {
+                return clean_html_entities(xml[s..s + end].trim());
+            }
+        }
+        String::new()
+    };
+
+    DeviceDetails {
+        model_name: extract("model-name"),
+        model_number: extract("model-number"),
+        software_version: extract("software-version"),
+        network_name: extract("network-name"),
+        power_mode: extract("power-mode"),
+        ui_resolution: extract("ui-resolution"),
+    }
+}
+
+fn update_media_player_worker(ip: &str, tx: &Sender<BackgroundMessage>, ctx: &egui::Context) {
+    let url = format!("http://{}:8060/query/media-player", ip);
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_millis(1500))
+        .build();
+    if let Ok(c) = client {
+        if let Ok(resp) = c.get(&url).send() {
+            if let Ok(text) = resp.text() {
+                let info = parse_media_player_xml(&text);
+                let _ = tx.send(BackgroundMessage::MediaPlayerUpdated(info));
+                ctx.request_repaint();
+            }
+        }
+    }
+}
+
+fn parse_media_player_xml(xml: &str) -> MediaPlayerInfo {
+    let mut info = MediaPlayerInfo::default();
+    
+    // Extract player state: <player state="play" ...>
+    if let Some(state_idx) = xml.find("state=\"") {
+        let after = &xml[state_idx + 7..];
+        if let Some(quote) = after.find('"') {
+            info.state = after[..quote].to_string();
+        }
+    }
+
+    // Extract plugin / app name: <plugin id="..." name="YouTube" />
+    if let Some(name_idx) = xml.find("name=\"") {
+        let after = &xml[name_idx + 6..];
+        if let Some(quote) = after.find('"') {
+            info.app_name = clean_html_entities(&after[..quote]);
+        }
+    }
+
+    // Extract position: <position>22961735 ms</position>
+    if let Some(pos_idx) = xml.find("<position>") {
+        let after = &xml[pos_idx + 10..];
+        if let Some(close) = after.find("</position>") {
+            let pos_str = after[..close].trim().trim_end_matches(" ms").trim();
+            if let Ok(ms) = pos_str.parse::<u64>() {
+                info.position_ms = Some(ms);
+            }
+        }
+    }
+
+    info
+}
+
+fn load_app_icon_worker(ip: &str, app_id: &str, tx: &Sender<BackgroundMessage>, ctx: &egui::Context) {
+    let url = format!("http://{}:8060/query/icon/{}", ip, app_id);
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_millis(1500))
+        .build();
+    if let Ok(c) = client {
+        if let Ok(resp) = c.get(&url).send() {
+            if resp.status().is_success() {
+                if let Ok(bytes) = resp.bytes() {
+                    if let Ok(img) = image::load_from_memory(&bytes) {
+                        let rgba = img.to_rgba8();
+                        let size = [rgba.width() as usize, rgba.height() as usize];
+                        let pixels = rgba.into_raw();
+                        let color_image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
+                        let _ = tx.send(BackgroundMessage::AppIconLoaded {
+                            id: app_id.to_string(),
+                            image: color_image,
+                        });
+                        ctx.request_repaint();
+                    }
                 }
             }
         }
@@ -847,6 +1035,45 @@ impl eframe::App for RokuRemoteApp {
                 });
         }
 
+        // Device Info Modal Window
+        if self.show_device_info {
+            egui::Window::new("ℹ Roku Device Details")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+                    egui::Grid::new("device_details_grid")
+                        .spacing([14.0, 8.0])
+                        .show(ui, |ui| {
+                            let mut row = |label: &str, val: &str| {
+                                ui.label(egui::RichText::new(label).strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new(if val.is_empty() { "—" } else { val }).color(self.theme.foreground));
+                                ui.end_row();
+                            };
+
+                            row("Device Name:", &self.device_name);
+                            row("Model Name:", &self.device_details.model_name);
+                            row("Model Number:", &self.device_details.model_number);
+                            row("Software Version:", &self.device_details.software_version);
+                            row("Wi-Fi Network:", &self.device_details.network_name);
+                            row("Display Resolution:", &self.device_details.ui_resolution);
+                            row("Power Mode:", &self.device_details.power_mode);
+                            row("IP Address:", &self.selected_device_ip);
+                        });
+
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Close").clicked() {
+                                self.show_device_info = false;
+                            }
+                        });
+                    });
+                });
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             let total_width = ui.available_width();
             let is_wide = total_width >= 680.0;
@@ -876,6 +1103,9 @@ impl eframe::App for RokuRemoteApp {
                     if ui.add(egui::Button::new("Power")).clicked() {
                         self.send_key("Power");
                     }
+                    if ui.add(egui::Button::new("Device Info")).clicked() {
+                        self.show_device_info = !self.show_device_info;
+                    }
                 });
             });
 
@@ -901,6 +1131,37 @@ impl eframe::App for RokuRemoteApp {
                         .strong()
                         .color(self.theme.accent),
                 );
+
+                // Now Playing playback status
+                let state_icon = match self.media_player.state.as_str() {
+                    "play" => "▶ Playing",
+                    "pause" => "⏸ Paused",
+                    "buffer" => "⏳ Buffering",
+                    _ => "",
+                };
+
+                if !state_icon.is_empty() {
+                    ui.add_space(6.0);
+                    let pos_text = if let Some(ms) = self.media_player.position_ms {
+                        let total_secs = ms / 1000;
+                        let mins = total_secs / 60;
+                        let secs = total_secs % 60;
+                        format!(" ({}:{:02})", mins, secs)
+                    } else {
+                        String::new()
+                    };
+
+                    ui.label(
+                        egui::RichText::new(format!("{}{}", state_icon, pos_text))
+                            .color(if self.media_player.state == "play" {
+                                egui::Color32::from_rgb(70, 190, 100)
+                            } else {
+                                egui::Color32::from_rgb(230, 170, 60)
+                            })
+                            .strong()
+                            .size(11.5),
+                    );
+                }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(egui::RichText::new(&self.status_text).weak().size(11.0));
@@ -1033,5 +1294,32 @@ mod tests {
 
         let malformed = "<apps><app id=\"incomplete";
         assert_eq!(parse_apps_xml(malformed).len(), 0);
+    }
+
+    #[test]
+    fn test_parse_media_player_xml() {
+        let sample = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?><player state=\"play\" error=\"false\"><plugin id=\"837\" name=\"YouTube\" /><format audio=\"aac\" video=\"av1\" /><position>22961735 ms</position></player>";
+        let info = parse_media_player_xml(sample);
+        assert_eq!(info.state, "play");
+        assert_eq!(info.app_name, "YouTube");
+        assert_eq!(info.position_ms, Some(22961735));
+
+        let paused = "<player state=\"pause\"><plugin name=\"Netflix\" /><position>5000 ms</position></player>";
+        let p_info = parse_media_player_xml(paused);
+        assert_eq!(p_info.state, "pause");
+        assert_eq!(p_info.app_name, "Netflix");
+        assert_eq!(p_info.position_ms, Some(5000));
+    }
+
+    #[test]
+    fn test_parse_device_details_xml() {
+        let sample = "<device-info><model-name>Roku Stick</model-name><model-number>3830R</model-number><software-version>15.3.4</software-version><network-name>HomeWi-Fi</network-name><power-mode>PowerOn</power-mode><ui-resolution>1080p</ui-resolution></device-info>";
+        let details = parse_device_details_xml(sample);
+        assert_eq!(details.model_name, "Roku Stick");
+        assert_eq!(details.model_number, "3830R");
+        assert_eq!(details.software_version, "15.3.4");
+        assert_eq!(details.network_name, "HomeWi-Fi");
+        assert_eq!(details.power_mode, "PowerOn");
+        assert_eq!(details.ui_resolution, "1080p");
     }
 }
