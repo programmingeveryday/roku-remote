@@ -552,11 +552,11 @@ impl RokuRemoteApp {
 
         let render_grid = |ui: &mut egui::Ui, app_to_launch: &mut Option<String>| {
             let avail_w = ui.available_width() - 8.0;
-            let min_card_w = if is_wide_layout { 110.0 } else { 96.0 };
+            let min_card_w = if is_wide_layout { 132.0 } else { 115.0 };
             let cols = ((avail_w / min_card_w).floor() as usize).max(2);
-            let spacing = 6.0;
-            let btn_w = ((avail_w - (spacing * (cols as f32 - 1.0))) / (cols as f32)).max(75.0);
-            let btn_h = 46.0;
+            let spacing = 8.0;
+            let btn_w = ((avail_w - (spacing * (cols as f32 - 1.0))) / (cols as f32)).max(90.0);
+            let btn_h = 52.0;
 
             egui::Grid::new("apps_grid")
                 .spacing([spacing, spacing])
@@ -581,7 +581,7 @@ impl RokuRemoteApp {
                             visuals.bg_stroke,
                         );
 
-                        let inner_rect = rect.shrink2(egui::vec2(4.0, 3.0));
+                        let inner_rect = rect.shrink2(egui::vec2(6.0, 4.0));
                         let has_icon = self.app_textures.contains_key(&app.id);
 
                         let mut child_ui = ui.new_child(
@@ -591,11 +591,11 @@ impl RokuRemoteApp {
                         );
 
                         if let Some(texture) = self.app_textures.get(&app.id) {
-                            child_ui.image((texture.id(), egui::vec2(28.0, 28.0)));
-                            child_ui.add_space(4.0);
+                            child_ui.image((texture.id(), egui::vec2(32.0, 32.0)));
+                            child_ui.add_space(6.0);
                         }
 
-                        let text_w = if has_icon { inner_rect.width() - 34.0 } else { inner_rect.width() };
+                        let text_w = if has_icon { (inner_rect.width() - 38.0).max(20.0) } else { inner_rect.width() };
                         let label = egui::Label::new(
                             egui::RichText::new(&app.name)
                                 .size(11.5)
