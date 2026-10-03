@@ -936,6 +936,9 @@ impl eframe::App for RokuRemoteApp {
                     });
             }
         });
+
+        // Keep event loop responsive to Wayland compositor pings while idle/unfocused
+        ctx.request_repaint_after(Duration::from_millis(1000));
     }
 }
 
