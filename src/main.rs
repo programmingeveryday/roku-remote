@@ -4,6 +4,7 @@ use std::fs;
 use std::net::{SocketAddr, TcpStream, UdpSocket};
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -144,6 +145,7 @@ fn load_omarchy_theme() -> ThemeColors {
 struct RokuRemoteApp {
     devices: Vec<RokuDevice>,
     selected_device_ip: String,
+    shared_ip: Arc<Mutex<String>>,
     device_name: String,
     active_app: String,
     media_player: MediaPlayerInfo,
@@ -174,9 +176,13 @@ impl RokuRemoteApp {
         let (tx, rx) = channel();
         Self::start_theme_watcher(tx.clone(), cc.egui_ctx.clone());
 
+        let shared_ip = Arc::new(Mutex::new("192.168.0.108".to_string()));
+        Self::start_playback_watcher(shared_ip.clone(), tx.clone(), cc.egui_ctx.clone());
+
         let app = Self {
             devices: Vec::new(),
             selected_device_ip: "192.168.0.108".to_string(),
+            shared_ip,
             device_name: "Roku Streaming Stick Plus".to_string(),
             active_app: "Loading...".to_string(),
             media_player: MediaPlayerInfo::default(),
@@ -240,6 +246,25 @@ impl RokuRemoteApp {
         visuals.selection.stroke = egui::Stroke::new(1.0f32, egui::Color32::WHITE);
 
         ctx.set_visuals(visuals);
+    }
+
+    fn start_playback_watcher(
+        shared_ip: Arc<Mutex<String>>,
+        tx: Sender<BackgroundMessage>,
+        ctx: egui::Context,
+    ) {
+        thread::spawn(move || {
+            loop {
+                thread::sleep(Duration::from_secs(3));
+                let ip = {
+                    let guard = shared_ip.lock().unwrap();
+                    guard.clone()
+                };
+                if !ip.is_empty() {
+                    update_media_player_worker(&ip, &tx, &ctx);
+                }
+            }
+        });
     }
 
     fn start_theme_watcher(tx: Sender<BackgroundMessage>, ctx: egui::Context) {
@@ -344,6 +369,9 @@ impl RokuRemoteApp {
     }
 
     fn refresh_device_info(&self) {
+        if let Ok(mut guard) = self.shared_ip.lock() {
+            *guard = self.selected_device_ip.clone();
+        }
         let ip = self.selected_device_ip.clone();
         let tx = self.tx.clone();
         let ctx = self.ctx.clone();
@@ -1162,17 +1190,8 @@ impl eframe::App for RokuRemoteApp {
 
                 if !state_icon.is_empty() {
                     ui.add_space(6.0);
-                    let pos_text = if let Some(ms) = self.media_player.position_ms {
-                        let total_secs = ms / 1000;
-                        let mins = total_secs / 60;
-                        let secs = total_secs % 60;
-                        format!(" ({}:{:02})", mins, secs)
-                    } else {
-                        String::new()
-                    };
-
                     ui.label(
-                        egui::RichText::new(format!("{}{}", state_icon, pos_text))
+                        egui::RichText::new(state_icon)
                             .color(if self.media_player.state == "play" {
                                 egui::Color32::from_rgb(70, 190, 100)
                             } else {
