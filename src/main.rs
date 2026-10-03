@@ -544,7 +544,33 @@ impl RokuRemoteApp {
                 if ui.add_sized(media_btn, egui::Button::new("<<")).clicked() {
                     self.send_key("Rev");
                 }
-                if ui.add_sized(play_btn, egui::Button::new("Play / Pause")).clicked() {
+
+                let (play_label, play_fill, play_text_color) = match self.media_player.state.as_str() {
+                    "play" => (
+                        "⏸ Pause",
+                        egui::Color32::from_rgb(38, 150, 78), // Vibrant green when playing
+                        egui::Color32::WHITE,
+                    ),
+                    "pause" => (
+                        "▶ Play",
+                        egui::Color32::from_rgb(215, 145, 30), // Amber / orange when paused
+                        egui::Color32::WHITE,
+                    ),
+                    _ => (
+                        "▶ / ⏸",
+                        self.theme.dark_background,
+                        self.theme.foreground,
+                    ),
+                };
+
+                let play_btn_widget = egui::Button::new(
+                    egui::RichText::new(play_label)
+                        .strong()
+                        .color(play_text_color),
+                )
+                .fill(play_fill);
+
+                if ui.add_sized(play_btn, play_btn_widget).clicked() {
                     self.send_key("Play");
                 }
                 if ui.add_sized(media_btn, egui::Button::new(">>")).clicked() {
