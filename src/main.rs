@@ -354,6 +354,56 @@ impl RokuRemoteApp {
         });
     }
 
+    fn toggle_power(&mut self) {
+        let currently_on = self.is_device_reachable && self.device_details.power_mode != "PowerOff" && self.device_details.power_mode != "Standby";
+        // Optimistic UI update: flip immediately so the user sees instant feedback
+        self.is_device_reachable = !currently_on;
+        if !currently_on {
+            self.device_details.power_mode = "PowerOn".to_string();
+        } else {
+            self.device_details.power_mode = "PowerOff".to_string();
+        }
+
+        let ip = self.selected_device_ip.clone();
+        let tx = self.tx.clone();
+        let ctx = self.ctx.clone();
+
+        thread::spawn(move || {
+            let key = if currently_on {
+                "PowerOff"
+            } else {
+                "PowerOn"
+            };
+
+            // Attempt primary key (PowerOff or PowerOn)
+            let client = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_millis(1200))
+                .build();
+
+            let mut sent = false;
+            if let Ok(ref c) = client {
+                let url = format!("http://{}:8060/keypress/{}", ip, key);
+                if let Ok(resp) = c.post(&url).send() {
+                    if resp.status().is_success() {
+                        sent = true;
+                    }
+                }
+                // Fallback to standard toggle "Power" key if device didn't accept PowerOn/PowerOff
+                if !sent {
+                    let fallback_url = format!("http://{}:8060/keypress/Power", ip);
+                    let _ = c.post(&fallback_url).send();
+                }
+            }
+
+            // Progressive validation checks at 600ms, 1600ms, and 3200ms
+            for delay in [600, 1000, 1600] {
+                thread::sleep(Duration::from_millis(delay));
+                update_device_name_worker(&ip, &tx, &ctx);
+                update_media_player_worker(&ip, &tx, &ctx);
+            }
+        });
+    }
+
     fn launch_app(&self, app_id: String) {
         let ip = self.selected_device_ip.clone();
         let tx = self.tx.clone();
@@ -1230,7 +1280,7 @@ impl eframe::App for RokuRemoteApp {
                     .fill(power_bg);
 
                     if ui.add(power_btn).clicked() {
-                        self.send_key("Power");
+                        self.toggle_power();
                     }
                     if ui.add(egui::Button::new("Device Info")).clicked() {
                         self.show_device_info = !self.show_device_info;
