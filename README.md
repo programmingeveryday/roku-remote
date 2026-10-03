@@ -92,18 +92,74 @@ If your Roku is running newer firmware with restricted network permissions:
 
 ---
 
-## 🏗️ Cross-Compiling
+## 🏗️ Cross-Compiling from Omarchy Linux
 
-Because this project uses `egui` and `eframe`, you can compile it for other operating systems:
+On **Omarchy Linux** (Arch Linux-based), you can easily cross-compile release binaries for **Windows** and **macOS** using native toolchains or cargo-cross.
 
-- **Windows (x86_64)**:
-  ```bash
-  cargo build --target x86_64-pc-windows-gnu --release
-  ```
-- **macOS (Apple Silicon)**:
-  ```bash
-  cargo build --target aarch64-apple-darwin --release
-  ```
+### 🪟 Cross-Compiling for Windows (`x86_64-pc-windows-gnu`)
+
+Omarchy provides the MinGW-w64 toolchain in the official Arch repositories:
+
+1. **Install MinGW cross-compiler and Windows Rust target**:
+   ```bash
+   sudo pacman -S mingw-w64-gcc
+   rustup target add x86_64-pc-windows-gnu
+   ```
+
+2. **Configure Cargo linker for MinGW**:
+   Add the linker to your project or global cargo config (`~/.cargo/config.toml`):
+   ```toml
+   [target.x86_64-pc-windows-gnu]
+   linker = "x86_64-w64-mingw32-gcc"
+   ar = "x86_64-w64-mingw32-ar"
+   ```
+
+3. **Build the Windows executable**:
+   ```bash
+   cargo build --target x86_64-pc-windows-gnu --release
+   ```
+   The compiled `.exe` will be located at:
+   ```bash
+   target/x86_64-pc-windows-gnu/release/roku-remote-rs.exe
+   ```
+
+---
+
+### 🍏 Cross-Compiling for macOS (Apple Silicon & Intel)
+
+Because macOS builds require Apple SDK frameworks, the cleanest method on Linux is using [`cross`](https://github.com/cross-rs/cross) (which uses containerized environments via Podman or Docker):
+
+1. **Install Podman (or Docker) and `cross`**:
+   ```bash
+   sudo pacman -S podman
+   cargo install cross --git https://github.com/cross-rs/cross
+   ```
+
+2. **Build for Apple Silicon (M1/M2/M3/M4)**:
+   ```bash
+   cross build --target aarch64-apple-darwin --release
+   ```
+
+3. **Build for Intel Mac**:
+   ```bash
+   cross build --target x86_64-apple-darwin --release
+   ```
+   The resulting binary will be in `target/aarch64-apple-darwin/release/roku-remote-rs` and can be placed directly into `Roku Remote.app/Contents/MacOS/`.
+
+---
+
+### ⚡ Using `cross` for Zero-Setup Multi-Platform Builds
+
+If you prefer not to install individual host C cross-compilers on Omarchy:
+```bash
+cargo install cross --git https://github.com/cross-rs/cross
+
+# Build for Windows:
+cross build --target x86_64-pc-windows-gnu --release
+
+# Build for Linux musl (portable static binary):
+cross build --target x86_64-unknown-linux-musl --release
+```
 
 ---
 
