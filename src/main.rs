@@ -127,6 +127,7 @@ struct RokuRemoteApp {
     apps: Vec<AppItem>,
     is_scanning: bool,
     status_text: String,
+    show_shortcuts: bool,
     theme: ThemeColors,
     last_theme_check: Instant,
     rx: Receiver<BackgroundMessage>,
@@ -152,6 +153,7 @@ impl RokuRemoteApp {
             apps: default_popular_apps(),
             is_scanning: false,
             status_text: "Ready".to_string(),
+            show_shortcuts: false,
             theme,
             last_theme_check: Instant::now(),
             rx,
@@ -656,10 +658,158 @@ fn default_popular_apps() -> Vec<AppItem> {
     ]
 }
 
+impl RokuRemoteApp {
+    fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
+        let (ctrl, key_up, key_down, key_left, key_right, key_enter, key_space, key_backspace, key_escape, key_h, key_r, key_i, key_m, key_p, key_comma) = ctx.input(|i| {
+            (
+                i.modifiers.ctrl,
+                i.key_pressed(egui::Key::ArrowUp),
+                i.key_pressed(egui::Key::ArrowDown),
+                i.key_pressed(egui::Key::ArrowLeft),
+                i.key_pressed(egui::Key::ArrowRight),
+                i.key_pressed(egui::Key::Enter),
+                i.key_pressed(egui::Key::Space),
+                i.key_pressed(egui::Key::Backspace),
+                i.key_pressed(egui::Key::Escape),
+                i.key_pressed(egui::Key::H),
+                i.key_pressed(egui::Key::R),
+                i.key_pressed(egui::Key::I),
+                i.key_pressed(egui::Key::M),
+                i.key_pressed(egui::Key::P),
+                i.key_pressed(egui::Key::Comma),
+            )
+        });
+
+        // Ctrl + , -> Toggle keyboard shortcuts help modal
+        if ctrl && key_comma {
+            self.show_shortcuts = !self.show_shortcuts;
+            return;
+        }
+
+        // Escape closes shortcuts dialog if open
+        if key_escape && self.show_shortcuts {
+            self.show_shortcuts = false;
+            return;
+        }
+
+        // Navigation & Media / Volume
+        if ctrl {
+            if key_right {
+                self.send_key("Fwd"); // Fast Forward
+            } else if key_left {
+                self.send_key("Rev"); // Rewind
+            } else if key_up {
+                self.send_key("VolumeUp"); // Volume Up
+            } else if key_down {
+                self.send_key("VolumeDown"); // Volume Down
+            } else if key_m {
+                self.send_key("VolumeMute"); // Mute
+            } else if key_p {
+                self.send_key("Play"); // Play/Pause
+            }
+        } else {
+            // Standard Navigation
+            if key_up {
+                self.send_key("Up");
+            } else if key_down {
+                self.send_key("Down");
+            } else if key_left {
+                self.send_key("Left");
+            } else if key_right {
+                self.send_key("Right");
+            } else if key_enter || key_space {
+                self.send_key("Select"); // OK Button
+            } else if key_backspace || key_escape {
+                self.send_key("Back"); // Back Button
+            } else if key_h {
+                self.send_key("Home"); // Home Button
+            } else if key_r {
+                self.send_key("InstantReplay"); // Replay Button
+            } else if key_i {
+                self.send_key("Info"); // Info / Options Button
+            } else if key_p {
+                self.send_key("Play"); // Play / Pause
+            }
+        }
+    }
+}
+
 impl eframe::App for RokuRemoteApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.handle_incoming_messages();
         self.check_theme_update(ctx);
+        self.handle_keyboard_shortcuts(ctx);
+
+        // Keyboard Shortcuts Modal Window
+        if self.show_shortcuts {
+            egui::Window::new("⌨ Keyboard Shortcuts")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+                    ui.label(egui::RichText::new("Control Roku directly with your keyboard:").strong());
+                    ui.separator();
+
+                    egui::Grid::new("shortcuts_grid")
+                        .spacing([16.0, 6.0])
+                        .show(ui, |ui| {
+                            ui.label(egui::RichText::new("Arrow Keys").strong());
+                            ui.label("Navigate Up / Down / Left / Right");
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("Enter / Space").strong());
+                            ui.label("OK / Select");
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("Ctrl + Up / Down").strong());
+                            ui.label("Volume Up / Volume Down");
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("Ctrl + Left / Right").strong());
+                            ui.label("Rewind (<<) / Fast Forward (>>)");
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("Backspace / Esc").strong());
+                            ui.label("Back");
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("H").strong());
+                            ui.label("Home");
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("P").strong());
+                            ui.label("Play / Pause");
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("R").strong());
+                            ui.label("Instant Replay");
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("I").strong());
+                            ui.label("Info / Options (*)");
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("Ctrl + M").strong());
+                            ui.label("Mute");
+                            ui.end_row();
+
+                            ui.label(egui::RichText::new("Ctrl + ,").strong());
+                            ui.label("Toggle this shortcuts cheat sheet");
+                            ui.end_row();
+                        });
+
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Close (Esc)").clicked() {
+                                self.show_shortcuts = false;
+                            }
+                        });
+                    });
+                });
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             let total_width = ui.available_width();
