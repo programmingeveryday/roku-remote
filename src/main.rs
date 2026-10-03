@@ -295,65 +295,72 @@ impl RokuRemoteApp {
                 ui.label(egui::RichText::new(format!("{} apps", self.apps.len())).weak().size(11.0));
             });
         });
-        ui.add_space(4.0);
+        ui.add_space(6.0);
 
         let mut app_to_launch = None;
 
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                let avail_w = ui.available_width() - 8.0;
+        let render_grid = |ui: &mut egui::Ui, app_to_launch: &mut Option<String>| {
+            let avail_w = ui.available_width() - 8.0;
+            let min_card_w = if is_wide_layout { 110.0 } else { 96.0 };
+            let cols = ((avail_w / min_card_w).floor() as usize).max(2);
+            let spacing = 6.0;
+            let btn_w = ((avail_w - (spacing * (cols as f32 - 1.0))) / (cols as f32)).max(75.0);
+            let btn_h = 42.0;
 
-                let min_card_w = if is_wide_layout { 110.0 } else { 96.0 };
-                let cols = ((avail_w / min_card_w).floor() as usize).max(2);
-                let spacing = 6.0;
-                let btn_w = ((avail_w - (spacing * (cols as f32 - 1.0))) / (cols as f32)).max(75.0);
-                let btn_h = 42.0;
+            egui::Grid::new("apps_grid")
+                .spacing([spacing, spacing])
+                .min_col_width(btn_w)
+                .max_col_width(btn_w)
+                .show(ui, |ui| {
+                    for (i, app) in self.apps.iter().enumerate() {
+                        let label = egui::Label::new(
+                            egui::RichText::new(&app.name).size(12.0)
+                        )
+                        .wrap_mode(egui::TextWrapMode::Wrap)
+                        .selectable(false);
 
-                egui::Grid::new("apps_grid")
-                    .spacing([spacing, spacing])
-                    .min_col_width(btn_w)
-                    .max_col_width(btn_w)
-                    .show(ui, |ui| {
-                        for (i, app) in self.apps.iter().enumerate() {
-                            let label = egui::Label::new(
-                                egui::RichText::new(&app.name).size(12.0)
-                            )
-                            .wrap_mode(egui::TextWrapMode::Wrap)
-                            .selectable(false);
+                        let (rect, response) = ui.allocate_exact_size(
+                            egui::vec2(btn_w, btn_h),
+                            egui::Sense::click(),
+                        );
 
-                            // Render custom button with centered multi-line label
-                            let (rect, response) = ui.allocate_exact_size(
-                                egui::vec2(btn_w, btn_h),
-                                egui::Sense::click(),
-                            );
-
-                            if response.clicked() {
-                                app_to_launch = Some(app.id.clone());
-                            }
-
-                            let visuals = ui.style().interact(&response);
-                            ui.painter().rect(
-                                rect,
-                                visuals.rounding,
-                                visuals.bg_fill,
-                                visuals.bg_stroke,
-                            );
-
-                            let text_rect = rect.shrink2(egui::vec2(4.0, 2.0));
-                            let mut child_ui = ui.new_child(
-                                egui::UiBuilder::new()
-                                    .max_rect(text_rect)
-                                    .layout(egui::Layout::centered_and_justified(egui::Direction::TopDown)),
-                            );
-                            child_ui.add(label);
-
-                            if (i + 1) % cols == 0 {
-                                ui.end_row();
-                            }
+                        if response.clicked() {
+                            *app_to_launch = Some(app.id.clone());
                         }
-                    });
-            });
+
+                        let visuals = ui.style().interact(&response);
+                        ui.painter().rect(
+                            rect,
+                            visuals.rounding,
+                            visuals.bg_fill,
+                            visuals.bg_stroke,
+                        );
+
+                        let text_rect = rect.shrink2(egui::vec2(4.0, 2.0));
+                        let mut child_ui = ui.new_child(
+                            egui::UiBuilder::new()
+                                .max_rect(text_rect)
+                                .layout(egui::Layout::centered_and_justified(egui::Direction::TopDown)),
+                        );
+                        child_ui.add(label);
+
+                        if (i + 1) % cols == 0 {
+                            ui.end_row();
+                        }
+                    }
+                });
+        };
+
+        if is_wide_layout {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    render_grid(ui, &mut app_to_launch);
+                });
+        } else {
+            // In narrow layout, render directly into the unconstrained outer column
+            render_grid(ui, &mut app_to_launch);
+        }
 
         if let Some(id) = app_to_launch {
             self.launch_app(id);
