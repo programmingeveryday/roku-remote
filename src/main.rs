@@ -36,7 +36,6 @@ struct RokuRemoteApp {
 
 impl RokuRemoteApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // Configure styling for a sleek, rounded modern remote feel
         let mut visuals = egui::Visuals::dark();
         visuals.window_rounding = egui::Rounding::same(12.0);
         visuals.widgets.noninteractive.rounding = egui::Rounding::same(8.0);
@@ -48,7 +47,7 @@ impl RokuRemoteApp {
 
         let mut style = (*cc.egui_ctx.style()).clone();
         style.spacing.item_spacing = egui::vec2(8.0, 8.0);
-        style.spacing.button_padding = egui::vec2(10.0, 8.0);
+        style.spacing.button_padding = egui::vec2(10.0, 7.0);
         cc.egui_ctx.set_style(style);
 
         let (tx, rx) = channel();
@@ -72,7 +71,6 @@ impl RokuRemoteApp {
     fn start_scan(&self) {
         let tx = self.tx.clone();
         thread::spawn(move || {
-            // 1. Try SSDP M-SEARCH broadcast
             let ssdp_msg = "M-SEARCH * HTTP/1.1\r\n\
                 HOST: 239.255.255.250:1900\r\n\
                 MAN: \"ssdp:discover\"\r\n\
@@ -99,7 +97,6 @@ impl RokuRemoteApp {
                 }
             }
 
-            // 2. Direct probe known address
             let probe_ips = vec!["192.168.0.108".to_string()];
             for ip in probe_ips {
                 let target: Result<SocketAddr, _> = format!("{}:8060", ip).parse();
@@ -282,181 +279,205 @@ impl eframe::App for RokuRemoteApp {
         self.handle_incoming_messages();
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            // Header Bar
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Roku Remote").strong().size(18.0));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Scan").clicked() {
-                        self.is_scanning = true;
-                        self.status_text = "Scanning network...".into();
-                        self.start_scan();
-                    }
-                    if ui.button("Power").clicked() {
-                        self.send_key("Power");
-                    }
-                });
-            });
-
-            ui.add_space(4.0);
-
-            // Device Connection & Info Row
-            ui.horizontal(|ui| {
-                ui.label("Device IP:");
-                let text_edit = ui.text_edit_singleline(&mut self.selected_device_ip);
-                if text_edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    self.refresh_device_info();
-                }
-                if ui.button("Connect").clicked() {
-                    self.refresh_device_info();
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new(&self.status_text).weak().size(11.0));
-                });
-            });
+            // Constrain overall content to a clean, centered column regardless of window width
+            let total_width = ui.available_width();
+            let content_width = 380.0f32.min(total_width - 24.0).max(300.0);
+            let horizontal_margin = ((total_width - content_width) / 2.0).max(0.0);
 
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Active:").weak());
-                ui.label(egui::RichText::new(&self.active_app).strong().color(egui::Color32::from_rgb(130, 210, 255)));
-            });
+                ui.add_space(horizontal_margin);
 
-            ui.add_space(4.0);
-            ui.separator();
-            ui.add_space(6.0);
+                ui.vertical(|ui| {
+                    ui.set_width(content_width);
 
-            // REMOTE CONTROL PAD (Contained in a sleek centered card)
-            let pad_btn_size = egui::vec2(52.0, 44.0);
-            let action_btn_size = egui::vec2(72.0, 36.0);
+                    // Header Row: Title & Action buttons
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("📺 Roku Remote").strong().size(18.0));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.add(egui::Button::new("Scan")).clicked() {
+                                self.is_scanning = true;
+                                self.status_text = "Scanning network...".into();
+                                self.start_scan();
+                            }
+                            if ui.add(egui::Button::new("Power")).clicked() {
+                                self.send_key("Power");
+                            }
+                        });
+                    });
 
-            ui.vertical_centered(|ui| {
-                egui::Frame::group(ui.style())
-                    .fill(egui::Color32::from_rgba_premultiplied(35, 35, 42, 220))
-                    .rounding(egui::Rounding::same(16.0))
-                    .inner_margin(egui::Margin::symmetric(24.0, 14.0))
-                    .show(ui, |ui| {
-                        // Top Row: Back & Home
+                    ui.add_space(4.0);
+
+                    // Connection Row
+                    ui.horizontal(|ui| {
+                        ui.label("Device IP:");
+                        let text_edit = ui.add(
+                            egui::TextEdit::singleline(&mut self.selected_device_ip)
+                                .desired_width(130.0)
+                        );
+                        if text_edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            self.refresh_device_info();
+                        }
+                        if ui.button("Connect").clicked() {
+                            self.refresh_device_info();
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(egui::RichText::new(&self.status_text).weak().size(11.0));
+                        });
+                    });
+
+                    // Active App status line
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Current App:").weak());
+                        ui.label(
+                            egui::RichText::new(&self.active_app)
+                                .strong()
+                                .color(egui::Color32::from_rgb(130, 210, 255)),
+                        );
+                    });
+
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(6.0);
+
+                    // REMOTE D-PAD CONTROLLER (Centered vertical box matching Python GTK grid layout)
+                    ui.vertical_centered(|ui| {
+                        let btn_dir = egui::vec2(60.0, 42.0);
+                        let btn_ok = egui::vec2(68.0, 44.0);
+                        let btn_nav = egui::vec2(76.0, 36.0);
+
+                        // Row 1: Back & Home
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = egui::vec2(24.0, 0.0);
-                            if ui.add_sized(action_btn_size, egui::Button::new("Back")).clicked() {
+                            let spacing = (content_width - (btn_nav.x * 2.0)) / 3.0;
+                            ui.add_space(spacing);
+                            if ui.add_sized(btn_nav, egui::Button::new("Back")).clicked() {
                                 self.send_key("Back");
                             }
-                            if ui.add_sized(action_btn_size, egui::Button::new("Home")).clicked() {
+                            ui.add_space(spacing);
+                            if ui.add_sized(btn_nav, egui::Button::new("Home")).clicked() {
                                 self.send_key("Home");
                             }
                         });
 
-                        ui.add_space(10.0);
+                        ui.add_space(6.0);
 
-                        // Directional Cluster: Up
-                        if ui.add_sized(pad_btn_size, egui::Button::new("Up")).clicked() {
+                        // Row 2: UP
+                        if ui.add_sized(btn_dir, egui::Button::new("Up")).clicked() {
                             self.send_key("Up");
                         }
 
-                        ui.add_space(4.0);
+                        ui.add_space(6.0);
 
-                        // Directional Cluster: Left, OK, Right
+                        // Row 3: LEFT, OK, RIGHT
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = egui::vec2(8.0, 0.0);
-                            if ui.add_sized(pad_btn_size, egui::Button::new("Left")).clicked() {
+                            let row_w = btn_dir.x + 8.0 + btn_ok.x + 8.0 + btn_dir.x;
+                            let pad = ((content_width - row_w) / 2.0).max(0.0);
+                            ui.add_space(pad);
+
+                            if ui.add_sized(btn_dir, egui::Button::new("Left")).clicked() {
                                 self.send_key("Left");
                             }
-                            if ui.add_sized(egui::vec2(60.0, 44.0), egui::Button::new(egui::RichText::new("OK").strong())).clicked() {
+                            if ui.add_sized(btn_ok, egui::Button::new(egui::RichText::new("OK").strong())).clicked() {
                                 self.send_key("Select");
                             }
-                            if ui.add_sized(pad_btn_size, egui::Button::new("Right")).clicked() {
+                            if ui.add_sized(btn_dir, egui::Button::new("Right")).clicked() {
                                 self.send_key("Right");
                             }
                         });
 
-                        ui.add_space(4.0);
+                        ui.add_space(6.0);
 
-                        // Directional Cluster: Down
-                        if ui.add_sized(pad_btn_size, egui::Button::new("Down")).clicked() {
+                        // Row 4: DOWN
+                        if ui.add_sized(btn_dir, egui::Button::new("Down")).clicked() {
                             self.send_key("Down");
                         }
 
-                        ui.add_space(10.0);
+                        ui.add_space(6.0);
 
-                        // Bottom Row: Replay & Info
+                        // Row 5: Replay & Info
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = egui::vec2(24.0, 0.0);
-                            if ui.add_sized(action_btn_size, egui::Button::new("Replay")).clicked() {
+                            let spacing = (content_width - (btn_nav.x * 2.0)) / 3.0;
+                            ui.add_space(spacing);
+                            if ui.add_sized(btn_nav, egui::Button::new("Replay")).clicked() {
                                 self.send_key("InstantReplay");
                             }
-                            if ui.add_sized(action_btn_size, egui::Button::new("Info (*)")).clicked() {
+                            ui.add_space(spacing);
+                            if ui.add_sized(btn_nav, egui::Button::new("Info (*)")).clicked() {
                                 self.send_key("Info");
                             }
                         });
                     });
-            });
 
-            ui.add_space(10.0);
-            ui.separator();
-            ui.add_space(4.0);
+                    ui.add_space(10.0);
+                    ui.separator();
+                    ui.add_space(6.0);
 
-            // Playback & Volume Control Toolbar (Evenly spaced & clean)
-            ui.vertical_centered(|ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                    
-                    let media_size = egui::vec2(40.0, 32.0);
-                    let play_size = egui::vec2(88.0, 32.0);
-                    let vol_size = egui::vec2(60.0, 32.0);
+                    // Media & Volume Toolbar (Evenly spaced)
+                    ui.vertical_centered(|ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                            let media_btn = egui::vec2(38.0, 32.0);
+                            let play_btn = egui::vec2(86.0, 32.0);
+                            let vol_btn = egui::vec2(54.0, 32.0);
 
-                    if ui.add_sized(media_size, egui::Button::new("<<")).clicked() {
-                        self.send_key("Rev");
-                    }
-                    if ui.add_sized(play_size, egui::Button::new("Play / Pause")).clicked() {
-                        self.send_key("Play");
-                    }
-                    if ui.add_sized(media_size, egui::Button::new(">>")).clicked() {
-                        self.send_key("Fwd");
-                    }
+                            if ui.add_sized(media_btn, egui::Button::new("<<")).clicked() {
+                                self.send_key("Rev");
+                            }
+                            if ui.add_sized(play_btn, egui::Button::new("Play / Pause")).clicked() {
+                                self.send_key("Play");
+                            }
+                            if ui.add_sized(media_btn, egui::Button::new(">>")).clicked() {
+                                self.send_key("Fwd");
+                            }
 
+                            ui.separator();
+
+                            if ui.add_sized(vol_btn, egui::Button::new("Vol -")).clicked() {
+                                self.send_key("VolumeDown");
+                            }
+                            if ui.add_sized(vol_btn, egui::Button::new("Vol +")).clicked() {
+                                self.send_key("VolumeUp");
+                            }
+                            if ui.add_sized(vol_btn, egui::Button::new("Mute")).clicked() {
+                                self.send_key("VolumeMute");
+                            }
+                        });
+                    });
+
+                    ui.add_space(8.0);
                     ui.separator();
 
-                    if ui.add_sized(vol_size, egui::Button::new("Vol -")).clicked() {
-                        self.send_key("VolumeDown");
-                    }
-                    if ui.add_sized(vol_size, egui::Button::new("Vol +")).clicked() {
-                        self.send_key("VolumeUp");
-                    }
-                    if ui.add_sized(vol_size, egui::Button::new("Mute")).clicked() {
-                        self.send_key("VolumeMute");
-                    }
-                });
-            });
-
-            ui.add_space(6.0);
-            ui.separator();
-
-            // Quick Launch Apps Section
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Quick Launch Apps").strong().size(14.0));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new(format!("{} apps", self.apps.len())).weak().size(11.0));
-                });
-            });
-            ui.add_space(4.0);
-
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .max_height(160.0)
-                .show(ui, |ui| {
-                    let mut app_to_launch = None;
-                    ui.horizontal_wrapped(|ui| {
-                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                        for app in &self.apps {
-                            let btn = egui::Button::new(&app.name);
-                            if ui.add_sized([106.0, 32.0], btn).clicked() {
-                                app_to_launch = Some(app.id.clone());
-                            }
-                        }
+                    // Quick Launch Apps Section (Responsive wrap grid)
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Quick Launch Apps").strong().size(14.0));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(egui::RichText::new(format!("{} apps", self.apps.len())).weak().size(11.0));
+                        });
                     });
-                    if let Some(id) = app_to_launch {
-                        self.launch_app(id);
-                    }
+                    ui.add_space(4.0);
+
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .max_height(200.0)
+                        .show(ui, |ui| {
+                            let mut app_to_launch = None;
+                            let app_btn_w = ((content_width - 16.0) / 3.0).max(90.0);
+
+                            ui.horizontal_wrapped(|ui| {
+                                ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                                for app in &self.apps {
+                                    if ui.add_sized([app_btn_w, 32.0], egui::Button::new(&app.name)).clicked() {
+                                        app_to_launch = Some(app.id.clone());
+                                    }
+                                }
+                            });
+
+                            if let Some(id) = app_to_launch {
+                                self.launch_app(id);
+                            }
+                        });
                 });
+            });
         });
 
         ctx.request_repaint_after(Duration::from_millis(300));
@@ -466,8 +487,8 @@ impl eframe::App for RokuRemoteApp {
 fn main() -> Result<(), eframe::Error> {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([410.0, 640.0])
-            .with_min_inner_size([380.0, 560.0])
+            .with_inner_size([400.0, 650.0])
+            .with_min_inner_size([340.0, 520.0])
             .with_title("Roku Remote"),
         ..Default::default()
     };
