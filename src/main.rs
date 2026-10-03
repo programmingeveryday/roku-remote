@@ -255,12 +255,13 @@ impl RokuRemoteApp {
             ui.separator();
             ui.add_space(6.0);
 
-            // Media & Volume Toolbar
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                let media_btn = egui::vec2(38.0, 32.0);
-                let play_btn = egui::vec2(84.0, 32.0);
-                let vol_btn = egui::vec2(54.0, 32.0);
+            // Dedicated Row 1: Media Playback (<<, Play/Pause, >>)
+            ui.horizontal(|ui| {
+                let media_btn = egui::vec2(48.0, 32.0);
+                let play_btn = egui::vec2(110.0, 32.0);
+                let row_w = media_btn.x + 8.0 + play_btn.x + 8.0 + media_btn.x;
+                let pad = ((width - row_w) / 2.0).max(0.0);
+                ui.add_space(pad);
 
                 if ui.add_sized(media_btn, egui::Button::new("<<")).clicked() {
                     self.send_key("Rev");
@@ -271,8 +272,16 @@ impl RokuRemoteApp {
                 if ui.add_sized(media_btn, egui::Button::new(">>")).clicked() {
                     self.send_key("Fwd");
                 }
+            });
 
-                ui.separator();
+            ui.add_space(6.0);
+
+            // Dedicated Row 2: Volume & Sound (Vol -, Vol +, Mute)
+            ui.horizontal(|ui| {
+                let vol_btn = egui::vec2(66.0, 32.0);
+                let row_w = vol_btn.x + 8.0 + vol_btn.x + 8.0 + vol_btn.x;
+                let pad = ((width - row_w) / 2.0).max(0.0);
+                ui.add_space(pad);
 
                 if ui.add_sized(vol_btn, egui::Button::new("Vol -")).clicked() {
                     self.send_key("VolumeDown");
