@@ -752,50 +752,62 @@ impl eframe::App for RokuRemoteApp {
                     ui.separator();
 
                     egui::Grid::new("shortcuts_grid")
-                        .spacing([16.0, 6.0])
+                        .spacing([14.0, 8.0])
                         .show(ui, |ui| {
-                            ui.label(egui::RichText::new("Arrow Keys").strong());
-                            ui.label("Navigate Up / Down / Left / Right");
+                            // Column 1: Icon, Column 2: Key combo, Column 3: Description
+                            ui.label("🎯");
+                            ui.label(egui::RichText::new("Arrow Keys").strong().color(self.theme.accent));
+                            ui.label(egui::RichText::new("Navigate Up / Down / Left / Right").color(self.theme.foreground));
                             ui.end_row();
 
-                            ui.label(egui::RichText::new("Enter / Space").strong());
-                            ui.label("OK / Select");
+                            ui.label("🔘");
+                            ui.label(egui::RichText::new("Enter / Space").strong().color(self.theme.accent));
+                            ui.label(egui::RichText::new("OK / Select").color(self.theme.foreground));
                             ui.end_row();
 
-                            ui.label(egui::RichText::new("Ctrl + Up / Down").strong());
-                            ui.label("Volume Up / Volume Down");
+                            ui.label("🔊");
+                            ui.label(egui::RichText::new("Ctrl + Up / Down").strong().color(self.theme.accent));
+                            ui.label(egui::RichText::new("Volume Up / Volume Down").color(self.theme.foreground));
                             ui.end_row();
 
-                            ui.label(egui::RichText::new("Ctrl + Left / Right").strong());
-                            ui.label("Rewind (<<) / Fast Forward (>>)");
+                            ui.label("⏩");
+                            ui.label(egui::RichText::new("Ctrl + Left / Right").strong().color(self.theme.accent));
+                            ui.label(egui::RichText::new("Rewind (<<) / Fast Forward (>>)").color(self.theme.foreground));
                             ui.end_row();
 
-                            ui.label(egui::RichText::new("Backspace / Esc").strong());
-                            ui.label("Back");
+                            ui.label("⮌");
+                            ui.label(egui::RichText::new("Backspace / Esc").strong().color(self.theme.accent));
+                            ui.label(egui::RichText::new("Back").color(self.theme.foreground));
                             ui.end_row();
 
-                            ui.label(egui::RichText::new("H").strong());
-                            ui.label("Home");
+                            ui.label("🏠");
+                            ui.label(egui::RichText::new("H").strong().color(self.theme.accent));
+                            ui.label(egui::RichText::new("Home").color(self.theme.foreground));
                             ui.end_row();
 
-                            ui.label(egui::RichText::new("P").strong());
-                            ui.label("Play / Pause");
+                            ui.label("⏯");
+                            ui.label(egui::RichText::new("P").strong().color(self.theme.accent));
+                            ui.label(egui::RichText::new("Play / Pause").color(self.theme.foreground));
                             ui.end_row();
 
-                            ui.label(egui::RichText::new("R").strong());
-                            ui.label("Instant Replay");
+                            ui.label("↺");
+                            ui.label(egui::RichText::new("R").strong().color(self.theme.accent));
+                            ui.label(egui::RichText::new("Instant Replay").color(self.theme.foreground));
                             ui.end_row();
 
-                            ui.label(egui::RichText::new("I").strong());
-                            ui.label("Info / Options (*)");
+                            ui.label("✱");
+                            ui.label(egui::RichText::new("I").strong().color(self.theme.accent));
+                            ui.label(egui::RichText::new("Info / Options (*)").color(self.theme.foreground));
                             ui.end_row();
 
-                            ui.label(egui::RichText::new("Ctrl + M").strong());
-                            ui.label("Mute");
+                            ui.label("🔇");
+                            ui.label(egui::RichText::new("Ctrl + M").strong().color(self.theme.accent));
+                            ui.label(egui::RichText::new("Mute").color(self.theme.foreground));
                             ui.end_row();
 
-                            ui.label(egui::RichText::new("Ctrl + ,").strong());
-                            ui.label("Toggle this shortcuts cheat sheet");
+                            ui.label("💡");
+                            ui.label(egui::RichText::new("Ctrl + ,").strong().color(self.theme.accent));
+                            ui.label(egui::RichText::new("Toggle this shortcuts cheat sheet").color(self.theme.foreground));
                             ui.end_row();
                         });
 
