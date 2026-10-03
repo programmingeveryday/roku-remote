@@ -130,6 +130,7 @@ struct RokuRemoteApp {
     status_text: String,
     show_shortcuts: bool,
     theme: ThemeColors,
+    ctx: egui::Context,
     rx: Receiver<BackgroundMessage>,
     tx: Sender<BackgroundMessage>,
 }
@@ -145,18 +146,7 @@ impl RokuRemoteApp {
         cc.egui_ctx.set_style(style);
 
         let (tx, rx) = channel();
-        Self::start_theme_watcher(tx.clone());
-
-        // Background heartbeat to wake the winit event loop periodically even when
-        // the Wayland surface is hidden or on an inactive workspace, ensuring
-        // compositor xdg_wm_base pings are responded to immediately.
-        let heartbeat_ctx = cc.egui_ctx.clone();
-        thread::spawn(move || {
-            loop {
-                thread::sleep(Duration::from_millis(250));
-                heartbeat_ctx.request_repaint();
-            }
-        });
+        Self::start_theme_watcher(tx.clone(), cc.egui_ctx.clone());
 
         let app = Self {
             devices: Vec::new(),
@@ -168,6 +158,7 @@ impl RokuRemoteApp {
             status_text: "Ready".to_string(),
             show_shortcuts: false,
             theme,
+            ctx: cc.egui_ctx.clone(),
             rx,
             tx,
         };
@@ -213,7 +204,7 @@ impl RokuRemoteApp {
         ctx.set_visuals(visuals);
     }
 
-    fn start_theme_watcher(tx: Sender<BackgroundMessage>) {
+    fn start_theme_watcher(tx: Sender<BackgroundMessage>, ctx: egui::Context) {
         thread::spawn(move || {
             let mut current = load_omarchy_theme();
             loop {
@@ -222,6 +213,7 @@ impl RokuRemoteApp {
                 if next.background != current.background || next.accent != current.accent {
                     current = next.clone();
                     let _ = tx.send(BackgroundMessage::ThemeUpdated(next));
+                    ctx.request_repaint();
                 }
             }
         });
@@ -229,6 +221,7 @@ impl RokuRemoteApp {
 
     fn start_scan(&self) {
         let tx = self.tx.clone();
+        let ctx = self.ctx.clone();
         thread::spawn(move || {
             let ssdp_msg = "M-SEARCH * HTTP/1.1\r\n\
                 HOST: 239.255.255.250:1900\r\n\
@@ -251,6 +244,7 @@ impl RokuRemoteApp {
                                 ip,
                                 name: "Roku Device".to_string(),
                             }));
+                            ctx.request_repaint();
                         }
                     }
                 }
@@ -265,17 +259,20 @@ impl RokuRemoteApp {
                             ip,
                             name: "Roku Streaming Stick Plus".to_string(),
                         }));
+                        ctx.request_repaint();
                     }
                 }
             }
 
             let _ = tx.send(BackgroundMessage::ScanFinished);
+            ctx.request_repaint();
         });
     }
 
     fn send_key(&self, key: &'static str) {
         let ip = self.selected_device_ip.clone();
         let tx = self.tx.clone();
+        let ctx = self.ctx.clone();
         thread::spawn(move || {
             let url = format!("http://{}:8060/keypress/{}", ip, key);
             let client = reqwest::blocking::Client::builder()
@@ -285,13 +282,14 @@ impl RokuRemoteApp {
                 let _ = c.post(&url).send();
             }
             thread::sleep(Duration::from_millis(800));
-            update_active_app_worker(&ip, &tx);
+            update_active_app_worker(&ip, &tx, &ctx);
         });
     }
 
     fn launch_app(&self, app_id: String) {
         let ip = self.selected_device_ip.clone();
         let tx = self.tx.clone();
+        let ctx = self.ctx.clone();
         thread::spawn(move || {
             let url = format!("http://{}:8060/launch/{}", ip, app_id);
             let client = reqwest::blocking::Client::builder()
@@ -301,17 +299,18 @@ impl RokuRemoteApp {
                 let _ = c.post(&url).send();
             }
             thread::sleep(Duration::from_millis(1000));
-            update_active_app_worker(&ip, &tx);
+            update_active_app_worker(&ip, &tx, &ctx);
         });
     }
 
     fn refresh_device_info(&self) {
         let ip = self.selected_device_ip.clone();
         let tx = self.tx.clone();
+        let ctx = self.ctx.clone();
         thread::spawn(move || {
-            update_device_name_worker(&ip, &tx);
-            update_active_app_worker(&ip, &tx);
-            update_apps_worker(&ip, &tx);
+            update_device_name_worker(&ip, &tx, &ctx);
+            update_active_app_worker(&ip, &tx, &ctx);
+            update_apps_worker(&ip, &tx, &ctx);
         });
     }
 
@@ -552,7 +551,7 @@ impl RokuRemoteApp {
     }
 }
 
-fn update_device_name_worker(ip: &str, tx: &Sender<BackgroundMessage>) {
+fn update_device_name_worker(ip: &str, tx: &Sender<BackgroundMessage>, ctx: &egui::Context) {
     let url = format!("http://{}:8060/query/device-info", ip);
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_millis(1500))
@@ -563,6 +562,7 @@ fn update_device_name_worker(ip: &str, tx: &Sender<BackgroundMessage>) {
                 if let Some(name) = parse_device_name_xml(&text) {
                     let cleaned = clean_html_entities(&name);
                     let _ = tx.send(BackgroundMessage::DeviceNameUpdated(cleaned));
+                    ctx.request_repaint();
                 }
             }
         }
@@ -587,7 +587,7 @@ fn parse_device_name_xml(xml: &str) -> Option<String> {
     None
 }
 
-fn update_active_app_worker(ip: &str, tx: &Sender<BackgroundMessage>) {
+fn update_active_app_worker(ip: &str, tx: &Sender<BackgroundMessage>, ctx: &egui::Context) {
     let url = format!("http://{}:8060/query/active-app", ip);
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_millis(1500))
@@ -598,13 +598,14 @@ fn update_active_app_worker(ip: &str, tx: &Sender<BackgroundMessage>) {
                 if let Some(app_name) = parse_active_app_xml(&text) {
                     let cleaned = clean_html_entities(&app_name);
                     let _ = tx.send(BackgroundMessage::ActiveAppUpdated(cleaned));
+                    ctx.request_repaint();
                 }
             }
         }
     }
 }
 
-fn update_apps_worker(ip: &str, tx: &Sender<BackgroundMessage>) {
+fn update_apps_worker(ip: &str, tx: &Sender<BackgroundMessage>, ctx: &egui::Context) {
     let url = format!("http://{}:8060/query/apps", ip);
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_millis(1500))
@@ -615,6 +616,7 @@ fn update_apps_worker(ip: &str, tx: &Sender<BackgroundMessage>) {
                 let parsed = parse_apps_xml(&text);
                 if !parsed.is_empty() {
                     let _ = tx.send(BackgroundMessage::AppsListUpdated(parsed));
+                    ctx.request_repaint();
                 }
             }
         }
@@ -954,9 +956,6 @@ impl eframe::App for RokuRemoteApp {
                     });
             }
         });
-
-        // Keep event loop responsive to Wayland compositor pings while idle/unfocused
-        ctx.request_repaint_after(Duration::from_millis(1000));
     }
 }
 
