@@ -46,6 +46,7 @@ enum BackgroundMessage {
     ThemeUpdated(ThemeColors),
     MediaPlayerUpdated(MediaPlayerInfo),
     DeviceDetailsUpdated(DeviceDetails),
+    PowerStateUpdated(bool),
     AppIconLoaded { id: String, image: egui::ColorImage },
 }
 
@@ -150,6 +151,7 @@ struct RokuRemoteApp {
     active_app: String,
     media_player: MediaPlayerInfo,
     device_details: DeviceDetails,
+    is_device_reachable: bool,
     show_device_info: bool,
     apps: Vec<AppItem>,
     app_textures: HashMap<String, egui::TextureHandle>,
@@ -187,6 +189,7 @@ impl RokuRemoteApp {
             active_app: "Loading...".to_string(),
             media_player: MediaPlayerInfo::default(),
             device_details: DeviceDetails::default(),
+            is_device_reachable: true,
             show_device_info: false,
             apps: default_popular_apps(),
             app_textures: HashMap::new(),
@@ -433,6 +436,9 @@ impl RokuRemoteApp {
                 }
                 BackgroundMessage::DeviceDetailsUpdated(details) => {
                     self.device_details = details;
+                }
+                BackgroundMessage::PowerStateUpdated(reachable) => {
+                    self.is_device_reachable = reachable;
                 }
                 BackgroundMessage::AppIconLoaded { id, image } => {
                     self.pending_icons.push((id, image));
@@ -719,18 +725,27 @@ fn update_device_name_worker(ip: &str, tx: &Sender<BackgroundMessage>, ctx: &egu
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_millis(1500))
         .build();
+    let mut success = false;
     if let Ok(c) = client {
         if let Ok(resp) = c.get(&url).send() {
-            if let Ok(text) = resp.text() {
-                if let Some(name) = parse_device_name_xml(&text) {
-                    let cleaned = clean_html_entities(&name);
-                    let _ = tx.send(BackgroundMessage::DeviceNameUpdated(cleaned));
+            if resp.status().is_success() {
+                if let Ok(text) = resp.text() {
+                    success = true;
+                    if let Some(name) = parse_device_name_xml(&text) {
+                        let cleaned = clean_html_entities(&name);
+                        let _ = tx.send(BackgroundMessage::DeviceNameUpdated(cleaned));
+                    }
+                    let details = parse_device_details_xml(&text);
+                    let _ = tx.send(BackgroundMessage::DeviceDetailsUpdated(details));
+                    let _ = tx.send(BackgroundMessage::PowerStateUpdated(true));
+                    ctx.request_repaint();
                 }
-                let details = parse_device_details_xml(&text);
-                let _ = tx.send(BackgroundMessage::DeviceDetailsUpdated(details));
-                ctx.request_repaint();
             }
         }
+    }
+    if !success {
+        let _ = tx.send(BackgroundMessage::PowerStateUpdated(false));
+        ctx.request_repaint();
     }
 }
 
@@ -1169,17 +1184,21 @@ impl eframe::App for RokuRemoteApp {
                         .color(self.theme.dark_foreground)
                 );
 
-                let is_powered_on = match self.device_details.power_mode.as_str() {
-                    "PowerOn" => true,
-                    "DisplayOff" | "Headless" => true, // Still active
-                    "PowerOff" | "Standby" => false,
-                    _ => !self.device_details.power_mode.is_empty(),
+                let is_powered_on = if !self.is_device_reachable {
+                    false
+                } else {
+                    match self.device_details.power_mode.as_str() {
+                        "PowerOn" => true,
+                        "DisplayOff" | "Headless" => true,
+                        "PowerOff" | "Standby" => false,
+                        _ => self.is_device_reachable,
+                    }
                 };
 
                 let power_indicator_dot = if is_powered_on {
-                    egui::RichText::new("●").color(egui::Color32::from_rgb(46, 204, 113)).size(10.0) // Bright green dot
+                    egui::RichText::new("●").color(egui::Color32::from_rgb(46, 204, 113)).size(11.0) // Green on dot
                 } else {
-                    egui::RichText::new("○").color(egui::Color32::from_rgb(231, 76, 60)).size(10.0) // Red / off dot
+                    egui::RichText::new("●").color(egui::Color32::from_rgb(220, 60, 50)).size(11.0) // Red off dot
                 };
 
                 ui.label(power_indicator_dot);
@@ -1191,24 +1210,22 @@ impl eframe::App for RokuRemoteApp {
                         self.start_scan();
                     }
 
-                    let (power_text, power_bg, power_fg) = if is_powered_on {
+                    let (power_text, power_bg) = if is_powered_on {
                         (
-                            "⏻ On",
+                            "Power: On",
                             egui::Color32::from_rgb(38, 150, 78), // Green
-                            egui::Color32::WHITE,
                         )
                     } else {
                         (
-                            "⏻ Off",
-                            egui::Color32::from_rgb(180, 50, 50), // Muted red
-                            egui::Color32::WHITE,
+                            "Power: Off",
+                            egui::Color32::from_rgb(190, 50, 50), // Muted Red
                         )
                     };
 
                     let power_btn = egui::Button::new(
                         egui::RichText::new(power_text)
                             .strong()
-                            .color(power_fg),
+                            .color(egui::Color32::WHITE),
                     )
                     .fill(power_bg);
 
