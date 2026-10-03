@@ -1,8 +1,10 @@
 use eframe::egui;
+use std::fs;
 use std::net::{SocketAddr, TcpStream, UdpSocket};
+use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug)]
 pub struct RokuDevice {
@@ -23,6 +25,101 @@ enum BackgroundMessage {
     ScanFinished,
 }
 
+#[derive(Clone, Debug)]
+struct ThemeColors {
+    mode: String,
+    background: egui::Color32,
+    dark_background: egui::Color32,
+    lighter_background: egui::Color32,
+    foreground: egui::Color32,
+    dark_foreground: egui::Color32,
+    accent: egui::Color32,
+    roku_purple: egui::Color32,
+}
+
+impl Default for ThemeColors {
+    fn default() -> Self {
+        Self {
+            mode: "dark".to_string(),
+            background: egui::Color32::from_rgb(26, 26, 32),
+            dark_background: egui::Color32::from_rgb(34, 34, 42),
+            lighter_background: egui::Color32::from_rgb(45, 45, 56),
+            foreground: egui::Color32::from_rgb(240, 240, 245),
+            dark_foreground: egui::Color32::from_rgb(160, 160, 175),
+            accent: egui::Color32::from_rgb(102, 45, 145), // Roku signature purple
+            roku_purple: egui::Color32::from_rgb(102, 45, 145),
+        }
+    }
+}
+
+fn parse_hex_color(hex: &str) -> Option<egui::Color32> {
+    let clean = hex.trim().trim_matches('"').trim_start_matches('#');
+    if clean.len() == 6 {
+        let r = u8::from_str_radix(&clean[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&clean[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&clean[4..6], 16).ok()?;
+        return Some(egui::Color32::from_rgb(r, g, b));
+    } else if clean.len() == 8 {
+        let r = u8::from_str_radix(&clean[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&clean[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&clean[4..6], 16).ok()?;
+        let a = u8::from_str_radix(&clean[6..8], 16).ok()?;
+        return Some(egui::Color32::from_rgba_unmultiplied(r, g, b, a));
+    }
+    None
+}
+
+fn load_omarchy_theme() -> ThemeColors {
+    let mut theme = ThemeColors::default();
+    
+    // Check ~/.local/state/omarchy/current/theme/colors.toml
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let candidates = vec![
+        PathBuf::from(&home).join(".local/state/omarchy/current/theme/colors.toml"),
+        PathBuf::from(&home).join(".config/omarchy/themes/current/colors.toml"),
+    ];
+
+    for path in candidates {
+        if let Ok(content) = fs::read_to_string(&path) {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with('#') || !trimmed.contains('=') {
+                    continue;
+                }
+                let mut parts = trimmed.splitn(2, '=');
+                let key = parts.next().unwrap_or("").trim();
+                let val = parts.next().unwrap_or("").trim().trim_matches('"');
+
+                match key {
+                    "mode" => theme.mode = val.to_string(),
+                    "background" => {
+                        if let Some(c) = parse_hex_color(val) { theme.background = c; }
+                    }
+                    "dark_background" => {
+                        if let Some(c) = parse_hex_color(val) { theme.dark_background = c; }
+                    }
+                    "lighter_background" => {
+                        if let Some(c) = parse_hex_color(val) { theme.lighter_background = c; }
+                    }
+                    "foreground" => {
+                        if let Some(c) = parse_hex_color(val) { theme.foreground = c; }
+                    }
+                    "dark_foreground" => {
+                        if let Some(c) = parse_hex_color(val) { theme.dark_foreground = c; }
+                    }
+                    "accent" => {
+                        if let Some(c) = parse_hex_color(val) { theme.accent = c; }
+                    }
+                    _ => {}
+                }
+            }
+            break;
+        }
+    }
+
+    theme
+}
+
 struct RokuRemoteApp {
     devices: Vec<RokuDevice>,
     selected_device_ip: String,
@@ -30,24 +127,20 @@ struct RokuRemoteApp {
     apps: Vec<AppItem>,
     is_scanning: bool,
     status_text: String,
+    theme: ThemeColors,
+    last_theme_check: Instant,
     rx: Receiver<BackgroundMessage>,
     tx: Sender<BackgroundMessage>,
 }
 
 impl RokuRemoteApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let mut visuals = egui::Visuals::dark();
-        visuals.window_rounding = egui::Rounding::same(10.0);
-        visuals.widgets.noninteractive.rounding = egui::Rounding::same(6.0);
-        visuals.widgets.inactive.rounding = egui::Rounding::same(6.0);
-        visuals.widgets.hovered.rounding = egui::Rounding::same(6.0);
-        visuals.widgets.active.rounding = egui::Rounding::same(6.0);
-        visuals.widgets.open.rounding = egui::Rounding::same(6.0);
-        cc.egui_ctx.set_visuals(visuals);
+        let theme = load_omarchy_theme();
+        Self::apply_theme(&cc.egui_ctx, &theme);
 
         let mut style = (*cc.egui_ctx.style()).clone();
-        style.spacing.item_spacing = egui::vec2(5.0, 5.0);
-        style.spacing.button_padding = egui::vec2(6.0, 4.0);
+        style.spacing.item_spacing = egui::vec2(6.0, 6.0);
+        style.spacing.button_padding = egui::vec2(8.0, 6.0);
         cc.egui_ctx.set_style(style);
 
         let (tx, rx) = channel();
@@ -58,6 +151,8 @@ impl RokuRemoteApp {
             apps: default_popular_apps(),
             is_scanning: false,
             status_text: "Ready".to_string(),
+            theme,
+            last_theme_check: Instant::now(),
             rx,
             tx,
         };
@@ -66,6 +161,57 @@ impl RokuRemoteApp {
         app.refresh_device_info();
 
         app
+    }
+
+    fn apply_theme(ctx: &egui::Context, theme: &ThemeColors) {
+        let is_dark = theme.mode == "dark";
+        let mut visuals = if is_dark {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        };
+
+        // Window & Panel background from Omarchy theme
+        visuals.panel_fill = theme.background;
+        visuals.window_fill = theme.background;
+
+        // Unified rounded contours for modern remote feel
+        visuals.window_rounding = egui::Rounding::same(12.0);
+        visuals.widgets.noninteractive.rounding = egui::Rounding::same(8.0);
+        visuals.widgets.inactive.rounding = egui::Rounding::same(8.0);
+        visuals.widgets.hovered.rounding = egui::Rounding::same(8.0);
+        visuals.widgets.active.rounding = egui::Rounding::same(8.0);
+        visuals.widgets.open.rounding = egui::Rounding::same(8.0);
+
+        // Buttons styled with Omarchy darker/lighter backgrounds and themed strokes
+        visuals.widgets.inactive.bg_fill = theme.dark_background;
+        visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0f32, theme.foreground);
+        visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0f32, theme.lighter_background);
+
+        visuals.widgets.hovered.bg_fill = theme.lighter_background;
+        visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0f32, theme.foreground);
+        visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.5f32, theme.accent);
+
+        // Active / Press state adopts Omarchy Accent / Roku Purple
+        visuals.widgets.active.bg_fill = theme.accent;
+        visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0f32, egui::Color32::WHITE);
+
+        // Text & selection colors
+        visuals.selection.bg_fill = theme.accent;
+        visuals.selection.stroke = egui::Stroke::new(1.0f32, egui::Color32::WHITE);
+
+        ctx.set_visuals(visuals);
+    }
+
+    fn check_theme_update(&mut self, ctx: &egui::Context) {
+        if self.last_theme_check.elapsed() > Duration::from_secs(3) {
+            self.last_theme_check = Instant::now();
+            let new_theme = load_omarchy_theme();
+            if new_theme.background != self.theme.background || new_theme.accent != self.theme.accent {
+                self.theme = new_theme;
+                Self::apply_theme(ctx, &self.theme);
+            }
+        }
     }
 
     fn start_scan(&self) {
@@ -183,7 +329,6 @@ impl RokuRemoteApp {
         }
     }
 
-    // Ultra-compact D-Pad controller: Takes only ~150px height total
     fn render_controls_section(&self, ui: &mut egui::Ui, width: f32) {
         ui.vertical_centered(|ui| {
             let btn_dir = egui::vec2(58.0, 40.0);
@@ -221,9 +366,19 @@ impl RokuRemoteApp {
                 if ui.add_sized(btn_dir, egui::Button::new("Left")).clicked() {
                     self.send_key("Left");
                 }
-                if ui.add_sized(btn_ok, egui::Button::new(egui::RichText::new("OK").strong())).clicked() {
+                
+                // OK Button accented with signature Roku / theme purple
+                let ok_btn = egui::Button::new(
+                    egui::RichText::new("OK")
+                        .strong()
+                        .color(egui::Color32::WHITE)
+                )
+                .fill(self.theme.roku_purple);
+
+                if ui.add_sized(btn_ok, ok_btn).clicked() {
                     self.send_key("Select");
                 }
+
                 if ui.add_sized(btn_dir, egui::Button::new("Right")).clicked() {
                     self.send_key("Right");
                 }
@@ -296,7 +451,6 @@ impl RokuRemoteApp {
         });
     }
 
-    // Applications Section: strict uniform cells with proper centered multi-line wrapping
     fn render_apps_section(&self, ui: &mut egui::Ui, is_wide_layout: bool) {
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Quick Launch Apps").strong().size(14.0));
@@ -323,7 +477,9 @@ impl RokuRemoteApp {
                 .show(ui, |ui| {
                     for (i, app) in self.apps.iter().enumerate() {
                         let label = egui::Label::new(
-                            egui::RichText::new(&app.name).size(12.0)
+                            egui::RichText::new(&app.name)
+                                .size(12.0)
+                                .color(self.theme.foreground)
                         )
                         .wrap_mode(egui::TextWrapMode::Wrap)
                         .selectable(false);
@@ -367,7 +523,6 @@ impl RokuRemoteApp {
                     render_grid(ui, &mut app_to_launch);
                 });
         } else {
-            // In narrow layout, render directly into the unconstrained outer column
             render_grid(ui, &mut app_to_launch);
         }
 
@@ -470,6 +625,7 @@ fn default_popular_apps() -> Vec<AppItem> {
 impl eframe::App for RokuRemoteApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.handle_incoming_messages();
+        self.check_theme_update(ctx);
 
         egui::CentralPanel::default().show(ctx, |ui| {
             let total_width = ui.available_width();
@@ -477,7 +633,12 @@ impl eframe::App for RokuRemoteApp {
 
             // Global Header
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("📺 Roku Remote").strong().size(17.0));
+                ui.label(
+                    egui::RichText::new("📺 Roku Remote")
+                        .strong()
+                        .size(17.0)
+                        .color(self.theme.foreground)
+                );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.add(egui::Button::new("Scan")).clicked() {
                         self.is_scanning = true;
@@ -493,7 +654,7 @@ impl eframe::App for RokuRemoteApp {
             ui.add_space(2.0);
 
             ui.horizontal(|ui| {
-                ui.label("Device IP:");
+                ui.label(egui::RichText::new("Device IP:").color(self.theme.dark_foreground));
                 let text_edit = ui.add(
                     egui::TextEdit::singleline(&mut self.selected_device_ip)
                         .desired_width(120.0)
@@ -510,7 +671,7 @@ impl eframe::App for RokuRemoteApp {
                 ui.label(
                     egui::RichText::new(&self.active_app)
                         .strong()
-                        .color(egui::Color32::from_rgb(130, 210, 255)),
+                        .color(self.theme.accent),
                 );
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -559,7 +720,7 @@ impl eframe::App for RokuRemoteApp {
                                 ui.separator();
                                 ui.add_space(8.0);
 
-                                // Applications Section - renders all app buttons completely
+                                // Applications Section
                                 self.render_apps_section(ui, false);
                                 ui.add_space(20.0);
                             });
