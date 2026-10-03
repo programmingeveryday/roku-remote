@@ -147,6 +147,17 @@ impl RokuRemoteApp {
         let (tx, rx) = channel();
         Self::start_theme_watcher(tx.clone());
 
+        // Background heartbeat to wake the winit event loop periodically even when
+        // the Wayland surface is hidden or on an inactive workspace, ensuring
+        // compositor xdg_wm_base pings are responded to immediately.
+        let heartbeat_ctx = cc.egui_ctx.clone();
+        thread::spawn(move || {
+            loop {
+                thread::sleep(Duration::from_millis(250));
+                heartbeat_ctx.request_repaint();
+            }
+        });
+
         let app = Self {
             devices: Vec::new(),
             selected_device_ip: "192.168.0.108".to_string(),
