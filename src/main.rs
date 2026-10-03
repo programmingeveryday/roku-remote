@@ -37,17 +37,17 @@ struct RokuRemoteApp {
 impl RokuRemoteApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut visuals = egui::Visuals::dark();
-        visuals.window_rounding = egui::Rounding::same(12.0);
-        visuals.widgets.noninteractive.rounding = egui::Rounding::same(8.0);
-        visuals.widgets.inactive.rounding = egui::Rounding::same(8.0);
-        visuals.widgets.hovered.rounding = egui::Rounding::same(8.0);
-        visuals.widgets.active.rounding = egui::Rounding::same(8.0);
-        visuals.widgets.open.rounding = egui::Rounding::same(8.0);
+        visuals.window_rounding = egui::Rounding::same(10.0);
+        visuals.widgets.noninteractive.rounding = egui::Rounding::same(6.0);
+        visuals.widgets.inactive.rounding = egui::Rounding::same(6.0);
+        visuals.widgets.hovered.rounding = egui::Rounding::same(6.0);
+        visuals.widgets.active.rounding = egui::Rounding::same(6.0);
+        visuals.widgets.open.rounding = egui::Rounding::same(6.0);
         cc.egui_ctx.set_visuals(visuals);
 
         let mut style = (*cc.egui_ctx.style()).clone();
-        style.spacing.item_spacing = egui::vec2(6.0, 6.0);
-        style.spacing.button_padding = egui::vec2(8.0, 6.0);
+        style.spacing.item_spacing = egui::vec2(5.0, 5.0);
+        style.spacing.button_padding = egui::vec2(6.0, 4.0);
         cc.egui_ctx.set_style(style);
 
         let (tx, rx) = channel();
@@ -183,17 +183,16 @@ impl RokuRemoteApp {
         }
     }
 
-    // Controls section: Compact sizing so vertical mode reserves room for the apps
+    // Ultra-compact D-Pad controller: Takes only ~150px height total
     fn render_controls_section(&self, ui: &mut egui::Ui, width: f32) {
         ui.vertical_centered(|ui| {
-            // Sizing calibrated for high usability without occupying excess vertical space
-            let btn_dir = egui::vec2(52.0, 36.0);
-            let btn_ok = egui::vec2(58.0, 38.0);
-            let btn_nav = egui::vec2(68.0, 32.0);
+            let btn_dir = egui::vec2(44.0, 28.0);
+            let btn_ok = egui::vec2(50.0, 28.0);
+            let btn_nav = egui::vec2(60.0, 26.0);
 
             // Row 1: Back & Home
             ui.horizontal(|ui| {
-                let spacing = ((width - (btn_nav.x * 2.0)) / 3.0).max(12.0);
+                let spacing = ((width - (btn_nav.x * 2.0)) / 3.0).max(8.0);
                 ui.add_space(spacing);
                 if ui.add_sized(btn_nav, egui::Button::new("Back")).clicked() {
                     self.send_key("Back");
@@ -204,18 +203,18 @@ impl RokuRemoteApp {
                 }
             });
 
-            ui.add_space(4.0);
+            ui.add_space(2.0);
 
             // Row 2: UP
             if ui.add_sized(btn_dir, egui::Button::new("Up")).clicked() {
                 self.send_key("Up");
             }
 
-            ui.add_space(4.0);
+            ui.add_space(2.0);
 
             // Row 3: LEFT, OK, RIGHT
             ui.horizontal(|ui| {
-                let row_w = btn_dir.x + 6.0 + btn_ok.x + 6.0 + btn_dir.x;
+                let row_w = btn_dir.x + 4.0 + btn_ok.x + 4.0 + btn_dir.x;
                 let pad = ((width - row_w) / 2.0).max(0.0);
                 ui.add_space(pad);
 
@@ -230,18 +229,18 @@ impl RokuRemoteApp {
                 }
             });
 
-            ui.add_space(4.0);
+            ui.add_space(2.0);
 
             // Row 4: DOWN
             if ui.add_sized(btn_dir, egui::Button::new("Down")).clicked() {
                 self.send_key("Down");
             }
 
-            ui.add_space(4.0);
+            ui.add_space(2.0);
 
             // Row 5: Replay & Info
             ui.horizontal(|ui| {
-                let spacing = ((width - (btn_nav.x * 2.0)) / 3.0).max(12.0);
+                let spacing = ((width - (btn_nav.x * 2.0)) / 3.0).max(8.0);
                 ui.add_space(spacing);
                 if ui.add_sized(btn_nav, egui::Button::new("Replay")).clicked() {
                     self.send_key("InstantReplay");
@@ -252,16 +251,16 @@ impl RokuRemoteApp {
                 }
             });
 
-            ui.add_space(8.0);
-            ui.separator();
             ui.add_space(6.0);
+            ui.separator();
+            ui.add_space(4.0);
 
             // Media & Volume Toolbar (Single compact row)
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
-                let media_btn = egui::vec2(36.0, 28.0);
-                let play_btn = egui::vec2(80.0, 28.0);
-                let vol_btn = egui::vec2(48.0, 28.0);
+                let media_btn = egui::vec2(34.0, 26.0);
+                let play_btn = egui::vec2(76.0, 26.0);
+                let vol_btn = egui::vec2(46.0, 26.0);
 
                 if ui.add_sized(media_btn, egui::Button::new("<<")).clicked() {
                     self.send_key("Rev");
@@ -288,10 +287,10 @@ impl RokuRemoteApp {
         });
     }
 
-    // Uniform grid button renderer with automatic text wrapping & centered alignment
+    // Applications Section: strict uniform cells with proper centered multi-line wrapping
     fn render_apps_section(&self, ui: &mut egui::Ui, is_wide_layout: bool) {
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Quick Launch Apps").strong().size(15.0));
+            ui.label(egui::RichText::new("Quick Launch Apps").strong().size(14.0));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(egui::RichText::new(format!("{} apps", self.apps.len())).weak().size(11.0));
             });
@@ -305,12 +304,11 @@ impl RokuRemoteApp {
             .show(ui, |ui| {
                 let avail_w = ui.available_width() - 8.0;
 
-                // Calculate fixed number of columns and exact uniform button width
-                let min_card_w = if is_wide_layout { 115.0 } else { 100.0 };
+                let min_card_w = if is_wide_layout { 110.0 } else { 96.0 };
                 let cols = ((avail_w / min_card_w).floor() as usize).max(2);
                 let spacing = 6.0;
-                let btn_w = ((avail_w - (spacing * (cols as f32 - 1.0))) / (cols as f32)).max(80.0);
-                let btn_h = 44.0; // Fixed uniform height to cleanly accommodate multi-line wrapped titles
+                let btn_w = ((avail_w - (spacing * (cols as f32 - 1.0))) / (cols as f32)).max(75.0);
+                let btn_h = 42.0;
 
                 egui::Grid::new("apps_grid")
                     .spacing([spacing, spacing])
@@ -318,15 +316,37 @@ impl RokuRemoteApp {
                     .max_col_width(btn_w)
                     .show(ui, |ui| {
                         for (i, app) in self.apps.iter().enumerate() {
-                            let button_text = egui::WidgetText::from(&app.name)
-                                .text_style(egui::TextStyle::Body);
+                            let label = egui::Label::new(
+                                egui::RichText::new(&app.name).size(12.0)
+                            )
+                            .wrap_mode(egui::TextWrapMode::Wrap)
+                            .selectable(false);
 
-                            let button = egui::Button::new(button_text)
-                                .wrap_mode(egui::TextWrapMode::Wrap);
+                            // Render custom button with centered multi-line label
+                            let (rect, response) = ui.allocate_exact_size(
+                                egui::vec2(btn_w, btn_h),
+                                egui::Sense::click(),
+                            );
 
-                            if ui.add_sized([btn_w, btn_h], button).clicked() {
+                            if response.clicked() {
                                 app_to_launch = Some(app.id.clone());
                             }
+
+                            let visuals = ui.style().interact(&response);
+                            ui.painter().rect(
+                                rect,
+                                visuals.rounding,
+                                visuals.bg_fill,
+                                visuals.bg_stroke,
+                            );
+
+                            let text_rect = rect.shrink2(egui::vec2(4.0, 2.0));
+                            let mut child_ui = ui.new_child(
+                                egui::UiBuilder::new()
+                                    .max_rect(text_rect)
+                                    .layout(egui::Layout::centered_and_justified(egui::Direction::TopDown)),
+                            );
+                            child_ui.add(label);
 
                             if (i + 1) % cols == 0 {
                                 ui.end_row();
@@ -437,11 +457,11 @@ impl eframe::App for RokuRemoteApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             let total_width = ui.available_width();
-            let is_wide = total_width >= 720.0;
+            let is_wide = total_width >= 680.0;
 
             // Global Header
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("📺 Roku Remote").strong().size(18.0));
+                ui.label(egui::RichText::new("📺 Roku Remote").strong().size(17.0));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.add(egui::Button::new("Scan")).clicked() {
                         self.is_scanning = true;
@@ -460,7 +480,7 @@ impl eframe::App for RokuRemoteApp {
                 ui.label("Device IP:");
                 let text_edit = ui.add(
                     egui::TextEdit::singleline(&mut self.selected_device_ip)
-                        .desired_width(125.0)
+                        .desired_width(120.0)
                 );
                 if text_edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     self.refresh_device_info();
@@ -469,7 +489,7 @@ impl eframe::App for RokuRemoteApp {
                     self.refresh_device_info();
                 }
 
-                ui.add_space(12.0);
+                ui.add_space(10.0);
                 ui.label(egui::RichText::new("Current:").weak());
                 ui.label(
                     egui::RichText::new(&self.active_app)
@@ -486,10 +506,9 @@ impl eframe::App for RokuRemoteApp {
             ui.separator();
             ui.add_space(4.0);
 
-            // Responsive Layout Body
             if is_wide {
-                // WIDE SCREEN: Controls Left (320px), Apps Grid Right (Takes all remaining width & height)
-                let controls_width = 320.0f32;
+                // WIDE SCREEN: Controls Left (300px), Apps Grid Right
+                let controls_width = 300.0f32;
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
                         ui.set_width(controls_width);
@@ -505,8 +524,8 @@ impl eframe::App for RokuRemoteApp {
                     });
                 });
             } else {
-                // NARROW SCREEN: Compact controls top, large expanding apps area bottom
-                let content_width = 380.0f32.min(total_width - 12.0).max(280.0);
+                // NARROW SCREEN: Slim controls at the top, leaving majority of screen for apps
+                let content_width = 360.0f32.min(total_width - 8.0).max(260.0);
                 let horizontal_margin = ((total_width - content_width) / 2.0).max(0.0);
 
                 ui.horizontal(|ui| {
@@ -521,7 +540,7 @@ impl eframe::App for RokuRemoteApp {
                         ui.separator();
                         ui.add_space(4.0);
 
-                        // Apps section takes ALL remaining vertical space
+                        // Maximize apps viewport
                         self.render_apps_section(ui, false);
                     });
                 });
@@ -535,8 +554,8 @@ impl eframe::App for RokuRemoteApp {
 fn main() -> Result<(), eframe::Error> {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([400.0, 680.0])
-            .with_min_inner_size([340.0, 520.0])
+            .with_inner_size([380.0, 640.0])
+            .with_min_inner_size([320.0, 480.0])
             .with_title("Roku Remote"),
         ..Default::default()
     };
