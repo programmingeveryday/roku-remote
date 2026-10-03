@@ -748,7 +748,11 @@ impl eframe::App for RokuRemoteApp {
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                 .show(ctx, |ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-                    ui.label(egui::RichText::new("Control Roku directly with your keyboard:").strong());
+                    ui.label(
+                        egui::RichText::new("Control Roku directly with your keyboard:")
+                            .strong()
+                            .color(self.theme.foreground)
+                    );
                     ui.separator();
 
                     egui::Grid::new("shortcuts_grid")
@@ -775,7 +779,7 @@ impl eframe::App for RokuRemoteApp {
                             ui.label(egui::RichText::new("Rewind (<<) / Fast Forward (>>)").color(self.theme.foreground));
                             ui.end_row();
 
-                            ui.label("⮌");
+                            ui.label("↩");
                             ui.label(egui::RichText::new("Backspace / Esc").strong().color(self.theme.accent));
                             ui.label(egui::RichText::new("Back").color(self.theme.foreground));
                             ui.end_row();
@@ -785,7 +789,7 @@ impl eframe::App for RokuRemoteApp {
                             ui.label(egui::RichText::new("Home").color(self.theme.foreground));
                             ui.end_row();
 
-                            ui.label("⏯");
+                            ui.label("▶⏸");
                             ui.label(egui::RichText::new("P").strong().color(self.theme.accent));
                             ui.label(egui::RichText::new("Play / Pause").color(self.theme.foreground));
                             ui.end_row();
