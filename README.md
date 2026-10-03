@@ -15,6 +15,20 @@ A fast, lightweight, and cross-platform native desktop remote control for Roku s
 
 ---
 
+## ⚠️ Important: Roku Device Setup & Network Permissions
+
+For this remote control (or any external app) to communicate with your Roku device over your local Wi-Fi, you **must ensure external control permissions are enabled** on your Roku:
+
+1. Turn on your Roku device / TV.
+2. Go to **Settings** → **System** → **Advanced system settings**.
+3. Select **Control by mobile apps** → **Network access**.
+4. Set it to **Default** or **Permissive** (do **not** leave it on *Disabled*).
+5. Ensure your computer and your Roku device are connected to the **same local Wi-Fi / LAN network**.
+
+> **Note:** Roku devices communicate via HTTP and SSDP over port `8060`. If the network access setting is Disabled, the Roku will block button presses and app launch requests.
+
+---
+
 ## 🛠️ Prerequisites
 
 You need a working Rust toolchain (version 1.75+ recommended):
@@ -78,17 +92,6 @@ The optimized executable will be located at:
 ```bash
 target/release/roku-remote-rs
 ```
-
----
-
-## 📱 Roku Configuration Note
-
-Roku devices use the **External Control Protocol (ECP)** over port `8060`. 
-
-If your Roku is running newer firmware with restricted network permissions:
-1. On your Roku device, navigate to:  
-   **Settings → System → Advanced system settings → Control by mobile apps → Network access**
-2. Set it to **Default** or **Permissive**.
 
 ---
 
