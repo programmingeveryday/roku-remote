@@ -552,11 +552,12 @@ impl RokuRemoteApp {
 
         let render_grid = |ui: &mut egui::Ui, app_to_launch: &mut Option<String>| {
             let avail_w = ui.available_width() - 8.0;
-            let min_card_w = if is_wide_layout { 132.0 } else { 115.0 };
+            // Near-square aspect ratio: width ~104px, height ~96px
+            let min_card_w = if is_wide_layout { 108.0 } else { 96.0 };
             let cols = ((avail_w / min_card_w).floor() as usize).max(2);
             let spacing = 8.0;
-            let btn_w = ((avail_w - (spacing * (cols as f32 - 1.0))) / (cols as f32)).max(90.0);
-            let btn_h = 52.0;
+            let btn_w = ((avail_w - (spacing * (cols as f32 - 1.0))) / (cols as f32)).max(85.0);
+            let btn_h = (btn_w * 0.92).clamp(88.0, 102.0);
 
             egui::Grid::new("apps_grid")
                 .spacing([spacing, spacing])
@@ -581,36 +582,39 @@ impl RokuRemoteApp {
                             visuals.bg_stroke,
                         );
 
-                        let inner_rect = rect.shrink2(egui::vec2(6.0, 4.0));
-                        let has_icon = self.app_textures.contains_key(&app.id);
+                        let inner_rect = rect.shrink2(egui::vec2(4.0, 4.0));
 
                         let mut child_ui = ui.new_child(
                             egui::UiBuilder::new()
                                 .max_rect(inner_rect)
-                                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                                .layout(egui::Layout::top_down(egui::Align::Center)),
                         );
 
                         if let Some(texture) = self.app_textures.get(&app.id) {
-                            child_ui.image((texture.id(), egui::vec2(32.0, 32.0)));
-                            child_ui.add_space(6.0);
+                            child_ui.add_space(2.0);
+                            child_ui.image((texture.id(), egui::vec2(42.0, 42.0)));
+                            child_ui.add_space(3.0);
+                        } else {
+                            child_ui.add_space(8.0);
+                            child_ui.label(
+                                egui::RichText::new("📺")
+                                    .size(24.0)
+                            );
+                            child_ui.add_space(4.0);
                         }
 
-                        let text_w = if has_icon { (inner_rect.width() - 38.0).max(20.0) } else { inner_rect.width() };
                         let label = egui::Label::new(
                             egui::RichText::new(&app.name)
-                                .size(11.5)
+                                .size(11.0)
+                                .strong()
                                 .color(self.theme.foreground)
                         )
                         .wrap_mode(egui::TextWrapMode::Wrap)
                         .selectable(false);
 
                         child_ui.allocate_ui_with_layout(
-                            egui::vec2(text_w, inner_rect.height()),
-                            if has_icon {
-                                egui::Layout::left_to_right(egui::Align::Center)
-                            } else {
-                                egui::Layout::centered_and_justified(egui::Direction::TopDown)
-                            },
+                            egui::vec2(inner_rect.width(), inner_rect.height() - 48.0),
+                            egui::Layout::centered_and_justified(egui::Direction::TopDown),
                             |ui| {
                                 ui.add(label);
                             },
