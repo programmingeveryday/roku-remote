@@ -955,3 +955,63 @@ fn main() -> Result<(), eframe::Error> {
         Box::new(|cc| Ok(Box::new(RokuRemoteApp::new(cc)))),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_hex_color() {
+        assert_eq!(parse_hex_color("#316ac5"), Some(egui::Color32::from_rgb(0x31, 0x6a, 0xc5)));
+        assert_eq!(parse_hex_color("316ac5"), Some(egui::Color32::from_rgb(0x31, 0x6a, 0xc5)));
+        assert_eq!(parse_hex_color("#316ac5ff"), Some(egui::Color32::from_rgba_unmultiplied(0x31, 0x6a, 0xc5, 0xff)));
+        assert_eq!(parse_hex_color("invalid"), None);
+        assert_eq!(parse_hex_color(""), None);
+    }
+
+    #[test]
+    fn test_clean_html_entities() {
+        assert_eq!(clean_html_entities("News &amp; Weather"), "News & Weather");
+        assert_eq!(clean_html_entities("It&apos;s a test"), "It's a test");
+        assert_eq!(clean_html_entities("&quot;Hello&quot;"), "\"Hello\"");
+        assert_eq!(clean_html_entities("&lt;tag&gt;"), "<tag>");
+    }
+
+    #[test]
+    fn test_parse_active_app_xml() {
+        let sample = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?><active-app><app id=\"837\">YouTube</app></active-app>";
+        assert_eq!(parse_active_app_xml(sample), Some("YouTube".to_string()));
+
+        let empty = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?><active-app></active-app>";
+        assert_eq!(parse_active_app_xml(empty), None);
+
+        let malformed = "just plain text";
+        assert_eq!(parse_active_app_xml(malformed), None);
+    }
+
+    #[test]
+    fn test_parse_device_name_xml() {
+        let xml_user = "<device-info><user-device-name>Living Room TV</user-device-name></device-info>";
+        assert_eq!(parse_device_name_xml(xml_user), Some("Living Room TV".to_string()));
+
+        let xml_model = "<device-info><model-name>Roku Stick</model-name></device-info>";
+        assert_eq!(parse_device_name_xml(xml_model), Some("Roku Stick".to_string()));
+
+        let xml_empty = "<device-info></device-info>";
+        assert_eq!(parse_device_name_xml(xml_empty), None);
+    }
+
+    #[test]
+    fn test_parse_apps_xml() {
+        let sample = "<apps><app id=\"837\">YouTube</app><app id=\"12\">Netflix &amp; Chill</app></apps>";
+        let apps = parse_apps_xml(sample);
+        assert_eq!(apps.len(), 2);
+        assert_eq!(apps[0].id, "837");
+        assert_eq!(apps[0].name, "YouTube");
+        assert_eq!(apps[1].id, "12");
+        assert_eq!(apps[1].name, "Netflix & Chill");
+
+        let malformed = "<apps><app id=\"incomplete";
+        assert_eq!(parse_apps_xml(malformed).len(), 0);
+    }
+}
