@@ -24,6 +24,7 @@ enum BackgroundMessage {
     ActiveAppUpdated(String),
     AppsListUpdated(Vec<AppItem>),
     ScanFinished,
+    ThemeUpdated(ThemeColors),
 }
 
 #[derive(Clone, Debug)]
@@ -129,7 +130,6 @@ struct RokuRemoteApp {
     status_text: String,
     show_shortcuts: bool,
     theme: ThemeColors,
-    last_theme_check: Instant,
     rx: Receiver<BackgroundMessage>,
     tx: Sender<BackgroundMessage>,
 }
@@ -145,6 +145,8 @@ impl RokuRemoteApp {
         cc.egui_ctx.set_style(style);
 
         let (tx, rx) = channel();
+        Self::start_theme_watcher(tx.clone());
+
         let app = Self {
             devices: Vec::new(),
             selected_device_ip: "192.168.0.108".to_string(),
@@ -155,7 +157,6 @@ impl RokuRemoteApp {
             status_text: "Ready".to_string(),
             show_shortcuts: false,
             theme,
-            last_theme_check: Instant::now(),
             rx,
             tx,
         };
@@ -201,15 +202,18 @@ impl RokuRemoteApp {
         ctx.set_visuals(visuals);
     }
 
-    fn check_theme_update(&mut self, ctx: &egui::Context) {
-        if self.last_theme_check.elapsed() > Duration::from_secs(4) {
-            self.last_theme_check = Instant::now();
-            let new_theme = load_omarchy_theme();
-            if new_theme.background != self.theme.background || new_theme.accent != self.theme.accent {
-                self.theme = new_theme;
-                Self::apply_theme(ctx, &self.theme);
+    fn start_theme_watcher(tx: Sender<BackgroundMessage>) {
+        thread::spawn(move || {
+            let mut current = load_omarchy_theme();
+            loop {
+                thread::sleep(Duration::from_secs(3));
+                let next = load_omarchy_theme();
+                if next.background != current.background || next.accent != current.accent {
+                    current = next.clone();
+                    let _ = tx.send(BackgroundMessage::ThemeUpdated(next));
+                }
             }
-        }
+        });
     }
 
     fn start_scan(&self) {
@@ -300,7 +304,7 @@ impl RokuRemoteApp {
         });
     }
 
-    fn handle_incoming_messages(&mut self) {
+    fn handle_incoming_messages(&mut self, ctx: &egui::Context) {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 BackgroundMessage::DeviceDiscovered(dev) => {
@@ -326,6 +330,10 @@ impl RokuRemoteApp {
                 BackgroundMessage::ScanFinished => {
                     self.is_scanning = false;
                     self.status_text = format!("Found {} device(s)", self.devices.len());
+                }
+                BackgroundMessage::ThemeUpdated(theme) => {
+                    Self::apply_theme(ctx, &theme);
+                    self.theme = theme;
                 }
             }
         }
@@ -736,8 +744,7 @@ impl RokuRemoteApp {
 
 impl eframe::App for RokuRemoteApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.handle_incoming_messages();
-        self.check_theme_update(ctx);
+        self.handle_incoming_messages(ctx);
         self.handle_keyboard_shortcuts(ctx);
 
         // Keyboard Shortcuts Modal Window
