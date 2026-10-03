@@ -2,6 +2,8 @@
 
 A fast, lightweight, and cross-platform native desktop remote control for Roku streaming sticks and Smart TVs. Written in **Rust** using **egui / eframe**.
 
+![Roku Remote Screenshot](docs/images/screenshot.png)
+
 ---
 
 ## ✨ Features
