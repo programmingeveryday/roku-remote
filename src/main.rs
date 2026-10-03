@@ -186,13 +186,13 @@ impl RokuRemoteApp {
     // Ultra-compact D-Pad controller: Takes only ~150px height total
     fn render_controls_section(&self, ui: &mut egui::Ui, width: f32) {
         ui.vertical_centered(|ui| {
-            let btn_dir = egui::vec2(44.0, 28.0);
-            let btn_ok = egui::vec2(50.0, 28.0);
-            let btn_nav = egui::vec2(60.0, 26.0);
+            let btn_dir = egui::vec2(58.0, 40.0);
+            let btn_ok = egui::vec2(66.0, 42.0);
+            let btn_nav = egui::vec2(76.0, 36.0);
 
             // Row 1: Back & Home
             ui.horizontal(|ui| {
-                let spacing = ((width - (btn_nav.x * 2.0)) / 3.0).max(8.0);
+                let spacing = ((width - (btn_nav.x * 2.0)) / 3.0).max(12.0);
                 ui.add_space(spacing);
                 if ui.add_sized(btn_nav, egui::Button::new("Back")).clicked() {
                     self.send_key("Back");
@@ -203,18 +203,18 @@ impl RokuRemoteApp {
                 }
             });
 
-            ui.add_space(2.0);
+            ui.add_space(6.0);
 
             // Row 2: UP
             if ui.add_sized(btn_dir, egui::Button::new("Up")).clicked() {
                 self.send_key("Up");
             }
 
-            ui.add_space(2.0);
+            ui.add_space(6.0);
 
             // Row 3: LEFT, OK, RIGHT
             ui.horizontal(|ui| {
-                let row_w = btn_dir.x + 4.0 + btn_ok.x + 4.0 + btn_dir.x;
+                let row_w = btn_dir.x + 8.0 + btn_ok.x + 8.0 + btn_dir.x;
                 let pad = ((width - row_w) / 2.0).max(0.0);
                 ui.add_space(pad);
 
@@ -229,18 +229,18 @@ impl RokuRemoteApp {
                 }
             });
 
-            ui.add_space(2.0);
+            ui.add_space(6.0);
 
             // Row 4: DOWN
             if ui.add_sized(btn_dir, egui::Button::new("Down")).clicked() {
                 self.send_key("Down");
             }
 
-            ui.add_space(2.0);
+            ui.add_space(6.0);
 
             // Row 5: Replay & Info
             ui.horizontal(|ui| {
-                let spacing = ((width - (btn_nav.x * 2.0)) / 3.0).max(8.0);
+                let spacing = ((width - (btn_nav.x * 2.0)) / 3.0).max(12.0);
                 ui.add_space(spacing);
                 if ui.add_sized(btn_nav, egui::Button::new("Replay")).clicked() {
                     self.send_key("InstantReplay");
@@ -251,16 +251,16 @@ impl RokuRemoteApp {
                 }
             });
 
-            ui.add_space(6.0);
+            ui.add_space(10.0);
             ui.separator();
-            ui.add_space(4.0);
+            ui.add_space(6.0);
 
-            // Media & Volume Toolbar (Single compact row)
+            // Media & Volume Toolbar
             ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
-                let media_btn = egui::vec2(34.0, 26.0);
-                let play_btn = egui::vec2(76.0, 26.0);
-                let vol_btn = egui::vec2(46.0, 26.0);
+                ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                let media_btn = egui::vec2(38.0, 32.0);
+                let play_btn = egui::vec2(84.0, 32.0);
+                let vol_btn = egui::vec2(54.0, 32.0);
 
                 if ui.add_sized(media_btn, egui::Button::new("<<")).clicked() {
                     self.send_key("Rev");
@@ -298,11 +298,9 @@ impl RokuRemoteApp {
         ui.add_space(4.0);
 
         let mut app_to_launch = None;
-        let avail_h = ui.available_height().max(180.0);
 
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
-            .max_height(avail_h)
             .show(ui, |ui| {
                 let avail_w = ui.available_width() - 8.0;
 
@@ -557,8 +555,8 @@ impl eframe::App for RokuRemoteApp {
 fn main() -> Result<(), eframe::Error> {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([380.0, 640.0])
-            .with_min_inner_size([320.0, 480.0])
+            .with_inner_size([420.0, 860.0])
+            .with_min_inner_size([320.0, 680.0])
             .with_title("Roku Remote"),
         ..Default::default()
     };
