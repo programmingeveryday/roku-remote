@@ -20,6 +20,7 @@ pub struct AppItem {
 
 enum BackgroundMessage {
     DeviceDiscovered(RokuDevice),
+    DeviceNameUpdated(String),
     ActiveAppUpdated(String),
     AppsListUpdated(Vec<AppItem>),
     ScanFinished,
@@ -46,7 +47,7 @@ impl Default for ThemeColors {
             lighter_background: egui::Color32::from_rgb(45, 45, 56),
             foreground: egui::Color32::from_rgb(240, 240, 245),
             dark_foreground: egui::Color32::from_rgb(160, 160, 175),
-            accent: egui::Color32::from_rgb(102, 45, 145), // Roku signature purple
+            accent: egui::Color32::from_rgb(102, 45, 145),
             roku_purple: egui::Color32::from_rgb(102, 45, 145),
         }
     }
@@ -71,8 +72,6 @@ fn parse_hex_color(hex: &str) -> Option<egui::Color32> {
 
 fn load_omarchy_theme() -> ThemeColors {
     let mut theme = ThemeColors::default();
-    
-    // Check ~/.local/state/omarchy/current/theme/colors.toml
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     let candidates = vec![
         PathBuf::from(&home).join(".local/state/omarchy/current/theme/colors.toml"),
@@ -123,6 +122,7 @@ fn load_omarchy_theme() -> ThemeColors {
 struct RokuRemoteApp {
     devices: Vec<RokuDevice>,
     selected_device_ip: String,
+    device_name: String,
     active_app: String,
     apps: Vec<AppItem>,
     is_scanning: bool,
@@ -147,6 +147,7 @@ impl RokuRemoteApp {
         let app = Self {
             devices: Vec::new(),
             selected_device_ip: "192.168.0.108".to_string(),
+            device_name: "Roku Streaming Stick Plus".to_string(),
             active_app: "Loading...".to_string(),
             apps: default_popular_apps(),
             is_scanning: false,
@@ -171,11 +172,9 @@ impl RokuRemoteApp {
             egui::Visuals::light()
         };
 
-        // Window & Panel background from Omarchy theme
         visuals.panel_fill = theme.background;
         visuals.window_fill = theme.background;
 
-        // Unified rounded contours for modern remote feel
         visuals.window_rounding = egui::Rounding::same(12.0);
         visuals.widgets.noninteractive.rounding = egui::Rounding::same(8.0);
         visuals.widgets.inactive.rounding = egui::Rounding::same(8.0);
@@ -183,7 +182,6 @@ impl RokuRemoteApp {
         visuals.widgets.active.rounding = egui::Rounding::same(8.0);
         visuals.widgets.open.rounding = egui::Rounding::same(8.0);
 
-        // Buttons styled with Omarchy darker/lighter backgrounds and themed strokes
         visuals.widgets.inactive.bg_fill = theme.dark_background;
         visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0f32, theme.foreground);
         visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0f32, theme.lighter_background);
@@ -192,11 +190,9 @@ impl RokuRemoteApp {
         visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0f32, theme.foreground);
         visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.5f32, theme.accent);
 
-        // Active / Press state adopts Omarchy Accent / Roku Purple
         visuals.widgets.active.bg_fill = theme.accent;
         visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0f32, egui::Color32::WHITE);
 
-        // Text & selection colors
         visuals.selection.bg_fill = theme.accent;
         visuals.selection.stroke = egui::Stroke::new(1.0f32, egui::Color32::WHITE);
 
@@ -204,7 +200,7 @@ impl RokuRemoteApp {
     }
 
     fn check_theme_update(&mut self, ctx: &egui::Context) {
-        if self.last_theme_check.elapsed() > Duration::from_secs(3) {
+        if self.last_theme_check.elapsed() > Duration::from_secs(4) {
             self.last_theme_check = Instant::now();
             let new_theme = load_omarchy_theme();
             if new_theme.background != self.theme.background || new_theme.accent != self.theme.accent {
@@ -228,7 +224,7 @@ impl RokuRemoteApp {
                 let _ = socket.send_to(ssdp_msg.as_bytes(), "239.255.255.250:1900");
 
                 let mut buf = [0u8; 1024];
-                let start = std::time::Instant::now();
+                let start = Instant::now();
                 while start.elapsed() < Duration::from_millis(1500) {
                     if let Ok((len, addr)) = socket.recv_from(&mut buf) {
                         let text = String::from_utf8_lossy(&buf[..len]);
@@ -296,6 +292,7 @@ impl RokuRemoteApp {
         let ip = self.selected_device_ip.clone();
         let tx = self.tx.clone();
         thread::spawn(move || {
+            update_device_name_worker(&ip, &tx);
             update_active_app_worker(&ip, &tx);
             update_apps_worker(&ip, &tx);
         });
@@ -312,6 +309,9 @@ impl RokuRemoteApp {
                         self.selected_device_ip = self.devices[0].ip.clone();
                         self.refresh_device_info();
                     }
+                }
+                BackgroundMessage::DeviceNameUpdated(name) => {
+                    self.device_name = name;
                 }
                 BackgroundMessage::ActiveAppUpdated(app) => {
                     self.active_app = app;
@@ -367,7 +367,6 @@ impl RokuRemoteApp {
                     self.send_key("Left");
                 }
                 
-                // OK Button accented with signature Roku / theme purple
                 let ok_btn = egui::Button::new(
                     egui::RichText::new("OK")
                         .strong()
@@ -532,6 +531,41 @@ impl RokuRemoteApp {
     }
 }
 
+fn update_device_name_worker(ip: &str, tx: &Sender<BackgroundMessage>) {
+    let url = format!("http://{}:8060/query/device-info", ip);
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_millis(1500))
+        .build();
+    if let Ok(c) = client {
+        if let Ok(resp) = c.get(&url).send() {
+            if let Ok(text) = resp.text() {
+                if let Some(name) = parse_device_name_xml(&text) {
+                    let cleaned = clean_html_entities(&name);
+                    let _ = tx.send(BackgroundMessage::DeviceNameUpdated(cleaned));
+                }
+            }
+        }
+    }
+}
+
+fn parse_device_name_xml(xml: &str) -> Option<String> {
+    // Priority: user-device-name -> friendly-device-name -> model-name
+    for tag in &["user-device-name", "friendly-device-name", "model-name"] {
+        let open_tag = format!("<{}>", tag);
+        let close_tag = format!("</{}>", tag);
+        if let Some(start) = xml.find(&open_tag) {
+            let content_start = start + open_tag.len();
+            if let Some(end) = xml[content_start..].find(&close_tag) {
+                let name = xml[content_start..content_start + end].trim();
+                if !name.is_empty() {
+                    return Some(name.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 fn update_active_app_worker(ip: &str, tx: &Sender<BackgroundMessage>) {
     let url = format!("http://{}:8060/query/active-app", ip);
     let client = reqwest::blocking::Client::builder()
@@ -639,6 +673,14 @@ impl eframe::App for RokuRemoteApp {
                         .size(17.0)
                         .color(self.theme.foreground)
                 );
+
+                // Display Roku custom friendly name
+                ui.label(
+                    egui::RichText::new(format!("• {}", self.device_name))
+                        .size(13.0)
+                        .color(self.theme.dark_foreground)
+                );
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.add(egui::Button::new("Scan")).clicked() {
                         self.is_scanning = true;
@@ -701,7 +743,7 @@ impl eframe::App for RokuRemoteApp {
                     });
                 });
             } else {
-                // NARROW SCREEN: Top-level ScrollArea so the entire remote and all application buttons are visible and stretch down
+                // NARROW SCREEN: Top-level ScrollArea
                 let content_width = 380.0f32.min(total_width - 12.0).max(280.0);
                 let horizontal_margin = ((total_width - content_width) / 2.0).max(0.0);
 
@@ -728,8 +770,6 @@ impl eframe::App for RokuRemoteApp {
                     });
             }
         });
-
-        ctx.request_repaint_after(Duration::from_millis(300));
     }
 }
 
@@ -738,7 +778,8 @@ fn main() -> Result<(), eframe::Error> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([420.0, 860.0])
             .with_min_inner_size([320.0, 680.0])
-            .with_title("Roku Remote"),
+            .with_title("Roku Remote")
+            .with_app_id("org.omarchy.roku.remote"),
         ..Default::default()
     };
 
