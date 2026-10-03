@@ -524,27 +524,31 @@ impl eframe::App for RokuRemoteApp {
                     });
                 });
             } else {
-                // NARROW SCREEN: Slim controls at the top, leaving majority of screen for apps
-                let content_width = 360.0f32.min(total_width - 8.0).max(260.0);
+                // NARROW SCREEN: Top-level ScrollArea so the entire remote and all application buttons are visible and stretch down
+                let content_width = 380.0f32.min(total_width - 12.0).max(280.0);
                 let horizontal_margin = ((total_width - content_width) / 2.0).max(0.0);
 
-                ui.horizontal(|ui| {
-                    ui.add_space(horizontal_margin);
-                    ui.vertical(|ui| {
-                        ui.set_width(content_width);
-                        ui.set_min_height(ui.available_height());
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.add_space(horizontal_margin);
+                            ui.vertical(|ui| {
+                                ui.set_width(content_width);
 
-                        // Compact controls section
-                        self.render_controls_section(ui, content_width);
+                                // Controls section
+                                self.render_controls_section(ui, content_width);
 
-                        ui.add_space(6.0);
-                        ui.separator();
-                        ui.add_space(4.0);
+                                ui.add_space(10.0);
+                                ui.separator();
+                                ui.add_space(8.0);
 
-                        // Maximize apps viewport to full remaining window height
-                        self.render_apps_section(ui, false);
+                                // Applications Section - renders all app buttons completely
+                                self.render_apps_section(ui, false);
+                                ui.add_space(20.0);
+                            });
+                        });
                     });
-                });
             }
         });
 
