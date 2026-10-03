@@ -37,7 +37,33 @@ sudo apt install build-essential pkg-config libssl-dev libx11-dev libxkbcommon-d
 
 ---
 
-## 🚀 Building & Running
+## 🚀 Easy Installation Scripts
+
+Automated compile-and-install scripts are provided in the `scripts/` directory for each operating system:
+
+### 🐧 Linux
+Compiles the optimized release binary, installs it to `~/.local/bin/roku-remote-rs`, and registers the `.desktop` menu launcher:
+```bash
+chmod +x scripts/install-linux.sh
+./scripts/install-linux.sh
+```
+
+### 🍏 macOS
+Compiles the release binary, creates a native `Roku Remote.app` bundle in `~/Applications` with High-DPI support, and adds the command-line binary to `~/.local/bin`:
+```bash
+chmod +x scripts/install-macos.sh
+./scripts/install-macos.sh
+```
+
+### 🪟 Windows
+Compiles `roku-remote-rs.exe`, installs it to `%LOCALAPPDATA%\Programs\RokuRemote`, adds it to the user's `PATH`, and creates a Start Menu shortcut:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1
+```
+
+---
+
+## 🔨 Manual Building & Running
 
 ### 1. Run in Development Mode
 ```bash
