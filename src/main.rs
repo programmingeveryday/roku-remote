@@ -262,6 +262,7 @@ impl RokuRemoteApp {
                 };
                 if !ip.is_empty() {
                     update_media_player_worker(&ip, &tx, &ctx);
+                    update_device_name_worker(&ip, &tx, &ctx);
                 }
             }
         });
@@ -1168,13 +1169,50 @@ impl eframe::App for RokuRemoteApp {
                         .color(self.theme.dark_foreground)
                 );
 
+                let is_powered_on = match self.device_details.power_mode.as_str() {
+                    "PowerOn" => true,
+                    "DisplayOff" | "Headless" => true, // Still active
+                    "PowerOff" | "Standby" => false,
+                    _ => !self.device_details.power_mode.is_empty(),
+                };
+
+                let power_indicator_dot = if is_powered_on {
+                    egui::RichText::new("●").color(egui::Color32::from_rgb(46, 204, 113)).size(10.0) // Bright green dot
+                } else {
+                    egui::RichText::new("○").color(egui::Color32::from_rgb(231, 76, 60)).size(10.0) // Red / off dot
+                };
+
+                ui.label(power_indicator_dot);
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.add(egui::Button::new("Scan")).clicked() {
                         self.is_scanning = true;
                         self.status_text = "Scanning network...".into();
                         self.start_scan();
                     }
-                    if ui.add(egui::Button::new("Power")).clicked() {
+
+                    let (power_text, power_bg, power_fg) = if is_powered_on {
+                        (
+                            "⏻ On",
+                            egui::Color32::from_rgb(38, 150, 78), // Green
+                            egui::Color32::WHITE,
+                        )
+                    } else {
+                        (
+                            "⏻ Off",
+                            egui::Color32::from_rgb(180, 50, 50), // Muted red
+                            egui::Color32::WHITE,
+                        )
+                    };
+
+                    let power_btn = egui::Button::new(
+                        egui::RichText::new(power_text)
+                            .strong()
+                            .color(power_fg),
+                    )
+                    .fill(power_bg);
+
+                    if ui.add(power_btn).clicked() {
                         self.send_key("Power");
                     }
                     if ui.add(egui::Button::new("Device Info")).clicked() {
