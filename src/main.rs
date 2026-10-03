@@ -298,9 +298,11 @@ impl RokuRemoteApp {
         ui.add_space(4.0);
 
         let mut app_to_launch = None;
+        let avail_h = ui.available_height().max(180.0);
 
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
+            .max_height(avail_h)
             .show(ui, |ui| {
                 let avail_w = ui.available_width() - 8.0;
 
@@ -532,6 +534,7 @@ impl eframe::App for RokuRemoteApp {
                     ui.add_space(horizontal_margin);
                     ui.vertical(|ui| {
                         ui.set_width(content_width);
+                        ui.set_min_height(ui.available_height());
 
                         // Compact controls section
                         self.render_controls_section(ui, content_width);
@@ -540,7 +543,7 @@ impl eframe::App for RokuRemoteApp {
                         ui.separator();
                         ui.add_space(4.0);
 
-                        // Maximize apps viewport
+                        // Maximize apps viewport to full remaining window height
                         self.render_apps_section(ui, false);
                     });
                 });
