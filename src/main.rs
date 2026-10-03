@@ -210,6 +210,7 @@ impl RokuRemoteApp {
 
         visuals.panel_fill = theme.background;
         visuals.window_fill = theme.background;
+        visuals.override_text_color = Some(theme.foreground);
 
         visuals.window_rounding = egui::Rounding::same(12.0);
         visuals.widgets.noninteractive.rounding = egui::Rounding::same(8.0);
@@ -217,6 +218,9 @@ impl RokuRemoteApp {
         visuals.widgets.hovered.rounding = egui::Rounding::same(8.0);
         visuals.widgets.active.rounding = egui::Rounding::same(8.0);
         visuals.widgets.open.rounding = egui::Rounding::same(8.0);
+
+        visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0f32, theme.foreground);
+        visuals.widgets.noninteractive.bg_fill = theme.background;
 
         visuals.widgets.inactive.bg_fill = theme.dark_background;
         visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0f32, theme.foreground);
@@ -228,6 +232,9 @@ impl RokuRemoteApp {
 
         visuals.widgets.active.bg_fill = theme.accent;
         visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0f32, egui::Color32::WHITE);
+
+        visuals.widgets.open.bg_fill = theme.lighter_background;
+        visuals.widgets.open.fg_stroke = egui::Stroke::new(1.0f32, theme.foreground);
 
         visuals.selection.bg_fill = theme.accent;
         visuals.selection.stroke = egui::Stroke::new(1.0f32, egui::Color32::WHITE);
@@ -541,9 +548,18 @@ impl RokuRemoteApp {
 
     fn render_apps_section(&self, ui: &mut egui::Ui, is_wide_layout: bool) {
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Quick Launch Apps").strong().size(14.0));
+            ui.label(
+                egui::RichText::new("Quick Launch Apps")
+                    .strong()
+                    .size(14.0)
+                    .color(self.theme.foreground)
+            );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(egui::RichText::new(format!("{} apps", self.apps.len())).weak().size(11.0));
+                ui.label(
+                    egui::RichText::new(format!("{} apps", self.apps.len()))
+                        .size(11.0)
+                        .color(self.theme.dark_foreground)
+                );
             });
         });
         ui.add_space(6.0);
@@ -1129,7 +1145,7 @@ impl eframe::App for RokuRemoteApp {
                 }
 
                 ui.add_space(10.0);
-                ui.label(egui::RichText::new("Current:").weak());
+                ui.label(egui::RichText::new("Current:").color(self.theme.dark_foreground));
                 ui.label(
                     egui::RichText::new(&self.active_app)
                         .strong()
@@ -1168,7 +1184,7 @@ impl eframe::App for RokuRemoteApp {
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new(&self.status_text).weak().size(11.0));
+                    ui.label(egui::RichText::new(&self.status_text).color(self.theme.dark_foreground).size(11.0));
                 });
             });
 
