@@ -14,10 +14,15 @@ use crate::roku::client::{
 };
 use crate::theme::{apply_theme, load_omarchy_theme, start_theme_watcher, ThemeColors};
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
+
 pub struct RokuRemoteApp {
     pub devices: Vec<RokuDevice>,
     pub selected_device_ip: String,
     pub shared_ip: Arc<Mutex<String>>,
+    pub is_active: Arc<AtomicBool>,
+    pub last_active: Instant,
     pub device_name: String,
     pub active_app: String,
     pub media_player: MediaPlayerInfo,
@@ -47,11 +52,17 @@ impl RokuRemoteApp {
         style.spacing.button_padding = egui::vec2(8.0, 6.0);
         cc.egui_ctx.set_style(style);
 
+        let is_active = Arc::new(AtomicBool::new(true));
         let (tx, rx) = channel();
-        start_theme_watcher(tx.clone(), cc.egui_ctx.clone());
+        start_theme_watcher(tx.clone(), cc.egui_ctx.clone(), is_active.clone());
 
         let shared_ip = Arc::new(Mutex::new("192.168.0.108".to_string()));
-        Self::start_playback_watcher(shared_ip.clone(), tx.clone(), cc.egui_ctx.clone());
+        Self::start_playback_watcher(
+            shared_ip.clone(),
+            tx.clone(),
+            cc.egui_ctx.clone(),
+            is_active.clone(),
+        );
 
         let initial_apps = crate::roku::client::load_cached_apps()
             .unwrap_or_else(default_popular_apps);
@@ -60,6 +71,8 @@ impl RokuRemoteApp {
             devices: Vec::new(),
             selected_device_ip: "192.168.0.108".to_string(),
             shared_ip,
+            is_active,
+            last_active: Instant::now(),
             device_name: "Roku Streaming Stick Plus".to_string(),
             active_app: "Loading...".to_string(),
             media_player: MediaPlayerInfo::default(),
@@ -92,10 +105,14 @@ impl RokuRemoteApp {
         shared_ip: Arc<Mutex<String>>,
         tx: Sender<BackgroundMessage>,
         ctx: egui::Context,
+        is_active: Arc<AtomicBool>,
     ) {
         thread::spawn(move || {
             loop {
                 thread::sleep(Duration::from_secs(2));
+                if !is_active.load(Ordering::Relaxed) {
+                    continue;
+                }
                 let ip = {
                     let guard = shared_ip.lock().unwrap();
                     guard.clone()
@@ -745,6 +762,39 @@ impl RokuRemoteApp {
 
 impl eframe::App for RokuRemoteApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let (is_minimized, is_focused, has_events) = ctx.input(|i| {
+            let minimized = i.viewport().minimized.unwrap_or(false);
+            let focused = i.focused;
+            let events = !i.raw.events.is_empty();
+            (minimized, focused, events)
+        });
+
+        if has_events && !is_minimized {
+            self.last_active = Instant::now();
+        }
+
+        let was_active = self.is_active.load(Ordering::Relaxed);
+        let is_active_now = if is_minimized {
+            false
+        } else if !is_focused {
+            self.last_active.elapsed() < Duration::from_secs(10)
+        } else {
+            self.last_active.elapsed() < Duration::from_secs(120)
+        };
+
+        if is_active_now != was_active {
+            self.is_active.store(is_active_now, Ordering::Relaxed);
+            if is_active_now {
+                // Just woke up from sleep state: refresh device state immediately
+                self.refresh_device_info();
+            }
+        }
+
+        // When nearing idle timeout, request a repaint so state transition can occur
+        if is_active_now && (!is_focused || self.last_active.elapsed() > Duration::from_secs(10)) {
+            ctx.request_repaint_after(Duration::from_secs(1));
+        }
+
         self.handle_incoming_messages(ctx);
         self.handle_keyboard_shortcuts(ctx);
 
@@ -1005,7 +1055,12 @@ impl eframe::App for RokuRemoteApp {
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new(&self.status_text).color(self.theme.dark_foreground).size(11.0));
+                    let display_status = if !self.is_active.load(Ordering::Relaxed) {
+                        "💤 Sleeping".to_string()
+                    } else {
+                        self.status_text.clone()
+                    };
+                    ui.label(egui::RichText::new(&display_status).color(self.theme.dark_foreground).size(11.0));
                 });
             });
 

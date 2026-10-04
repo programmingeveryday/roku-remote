@@ -142,11 +142,18 @@ pub fn apply_theme(ctx: &egui::Context, theme: &ThemeColors) {
     ctx.set_visuals(visuals);
 }
 
-pub fn start_theme_watcher(tx: Sender<BackgroundMessage>, ctx: egui::Context) {
+pub fn start_theme_watcher(
+    tx: Sender<BackgroundMessage>,
+    ctx: egui::Context,
+    is_active: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
     thread::spawn(move || {
         let mut current = load_omarchy_theme();
         loop {
             thread::sleep(Duration::from_secs(3));
+            if !is_active.load(std::sync::atomic::Ordering::Relaxed) {
+                continue;
+            }
             let next = load_omarchy_theme();
             if next.background != current.background || next.accent != current.accent {
                 current = next.clone();
