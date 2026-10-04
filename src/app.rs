@@ -777,6 +777,45 @@ fn is_hyprland_focused() -> Option<bool> {
     Some(text.contains(&format!("\"pid\": {}", my_pid)))
 }
 
+fn draw_power_icon(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    radius: f32,
+    color: egui::Color32,
+    stroke_width: f32,
+) {
+    let gap = 0.55f32; // opening at the top of the circle
+    let start_angle = -std::f32::consts::FRAC_PI_2 + gap;
+    let end_angle = -std::f32::consts::FRAC_PI_2 + std::f32::consts::TAU - gap;
+    let segments = 24;
+    let arc_points: Vec<egui::Pos2> = (0..=segments)
+        .map(|i| {
+            let t = i as f32 / segments as f32;
+            let angle = start_angle + t * (end_angle - start_angle);
+            egui::pos2(
+                center.x + radius * angle.cos(),
+                center.y + radius * angle.sin(),
+            )
+        })
+        .collect();
+
+    painter.add(egui::Shape::line(
+        arc_points,
+        egui::Stroke::new(stroke_width, color),
+    ));
+
+    // Vertical line going through the top notch
+    let line_bottom = center.y + radius * 0.05;
+    let line_top = center.y - radius * 1.15;
+    painter.line_segment(
+        [
+            egui::pos2(center.x, line_bottom),
+            egui::pos2(center.x, line_top),
+        ],
+        egui::Stroke::new(stroke_width, color),
+    );
+}
+
 impl eframe::App for RokuRemoteApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let window_rect = ctx.screen_rect();
@@ -1001,18 +1040,19 @@ impl eframe::App for RokuRemoteApp {
                     }
                 };
 
-                let (power_dot_color, power_status_label) = if is_powered_on {
+                let (power_icon_color, power_status_label) = if is_powered_on {
                     (egui::Color32::from_rgb(46, 204, 113), "On")
                 } else {
                     (egui::Color32::from_rgb(220, 60, 50), "Off")
                 };
 
-                ui.label(egui::RichText::new("●").color(power_dot_color).size(10.0));
+                let (badge_rect, _) = ui.allocate_exact_size(egui::vec2(13.0, 14.0), egui::Sense::hover());
+                draw_power_icon(ui.painter(), badge_rect.center(), 4.5, power_icon_color, 1.6);
                 ui.label(
                     egui::RichText::new(power_status_label)
                         .size(11.5)
                         .strong()
-                        .color(power_dot_color),
+                        .color(power_icon_color),
                 );
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1022,26 +1062,51 @@ impl eframe::App for RokuRemoteApp {
                         self.start_discovery_scan();
                     }
 
-                    let (power_text, power_bg) = if is_powered_on {
+                    let (power_label, power_bg, hover_bg) = if is_powered_on {
                         (
-                            "⏻ Power Off",
-                            egui::Color32::from_rgb(195, 55, 55), // Red button to power off / shut down
+                            "Power Off",
+                            egui::Color32::from_rgb(195, 55, 55),
+                            egui::Color32::from_rgb(220, 68, 68),
                         )
                     } else {
                         (
-                            "⏻ Power On",
-                            egui::Color32::from_rgb(38, 150, 78), // Green button to power on
+                            "Power On",
+                            egui::Color32::from_rgb(38, 150, 78),
+                            egui::Color32::from_rgb(46, 172, 90),
                         )
                     };
 
-                    let power_btn = egui::Button::new(
-                        egui::RichText::new(power_text)
-                            .strong()
-                            .color(egui::Color32::WHITE),
-                    )
-                    .fill(power_bg);
+                    let btn_size = egui::vec2(104.0, 26.0);
+                    let (rect, response) = ui.allocate_exact_size(btn_size, egui::Sense::click());
+                    let visuals = ui.style().interact(&response);
 
-                    if ui.add(power_btn).clicked() {
+                    let bg = if response.is_pointer_button_down_on() {
+                        if is_powered_on {
+                            egui::Color32::from_rgb(170, 45, 45)
+                        } else {
+                            egui::Color32::from_rgb(30, 130, 65)
+                        }
+                    } else if response.hovered() {
+                        hover_bg
+                    } else {
+                        power_bg
+                    };
+
+                    ui.painter().rect(rect, visuals.rounding, bg, visuals.bg_stroke);
+
+                    let icon_center = egui::pos2(rect.min.x + 18.0, rect.center().y);
+                    draw_power_icon(ui.painter(), icon_center, 4.8, egui::Color32::WHITE, 1.8);
+
+                    let text_pos = egui::pos2(rect.min.x + 30.0, rect.center().y);
+                    ui.painter().text(
+                        text_pos,
+                        egui::Align2::LEFT_CENTER,
+                        power_label,
+                        egui::FontId::proportional(12.0),
+                        egui::Color32::WHITE,
+                    );
+
+                    if response.clicked() {
                         self.toggle_power();
                     }
                     if ui.add(egui::Button::new("Device Info")).clicked() {
