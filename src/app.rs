@@ -1108,7 +1108,7 @@ impl eframe::App for RokuRemoteApp {
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new("⚠️ Mobile control is limited. Commands cannot be sent.")
+                                egui::RichText::new("\u{26A0} Mobile control is limited. Commands cannot be sent.")
                                     .color(egui::Color32::from_rgb(240, 160, 40))
                                     .size(11.5),
                             );
@@ -1520,7 +1520,7 @@ impl eframe::App for RokuRemoteApp {
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new("⚠️ Roku Mobile App Control is 'Limited' (remote keypresses blocked).")
+                        egui::RichText::new("\u{26A0} Roku Mobile App Control is 'Limited' (remote keypresses blocked).")
                             .color(egui::Color32::from_rgb(240, 160, 40))
                             .size(12.0)
                             .strong(),
@@ -1533,7 +1533,7 @@ impl eframe::App for RokuRemoteApp {
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new(format!("⚠️ Roku unreachable at {}. Verify network & power.", self.selected_device_ip))
+                        egui::RichText::new(format!("\u{26A0} Roku unreachable at {}. Verify network & power.", self.selected_device_ip))
                             .color(egui::Color32::from_rgb(220, 80, 70))
                             .size(12.0),
                     );
