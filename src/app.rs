@@ -1039,6 +1039,7 @@ impl eframe::App for RokuRemoteApp {
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .default_width(380.0)
                 .show(ctx, |ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
                     egui::Grid::new("device_details_grid")
@@ -1059,7 +1060,21 @@ impl eframe::App for RokuRemoteApp {
                             row("Display Resolution:", &self.device_details.ui_resolution);
                             row("Power Mode:", &self.device_details.power_mode);
                             row("IP Address:", &self.selected_device_ip);
-                            row("Mobile App Control:", &self.device_details.ecp_setting_mode);
+
+                            ui.label(egui::RichText::new("Mobile App Control:").strong().color(self.theme.accent));
+                            let ecp_mode = if self.device_details.ecp_setting_mode.is_empty() {
+                                "—"
+                            } else {
+                                &self.device_details.ecp_setting_mode
+                            };
+                            let (ecp_display, ecp_color) = match ecp_mode.to_lowercase().as_str() {
+                                "limited" => ("Limited (Commands blocked)", egui::Color32::from_rgb(235, 150, 35)),
+                                "disabled" => ("Disabled", egui::Color32::from_rgb(220, 60, 50)),
+                                "permissive" | "default" => (ecp_mode, egui::Color32::from_rgb(46, 204, 113)),
+                                _ => (ecp_mode, self.theme.foreground),
+                            };
+                            ui.label(egui::RichText::new(ecp_display).color(ecp_color));
+                            ui.end_row();
 
                             let is_active = self.is_active.load(Ordering::Relaxed);
                             ui.label(egui::RichText::new("App Status:").strong().color(self.theme.accent));
@@ -1102,25 +1117,66 @@ impl eframe::App for RokuRemoteApp {
                             ui.end_row();
                         });
 
-                    if self.device_details.ecp_setting_mode.eq_ignore_ascii_case("limited")
-                        || self.device_details.ecp_setting_mode.eq_ignore_ascii_case("disabled")
-                    {
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new("\u{26A0} Mobile control is limited. Commands cannot be sent.")
-                                    .color(egui::Color32::from_rgb(240, 160, 40))
-                                    .size(11.5),
-                            );
-                            if ui.button("⚙ Setup Guide").clicked() {
-                                self.show_setup_guide = true;
-                            }
-                        });
+                    let is_limited = self.device_details.ecp_setting_mode.eq_ignore_ascii_case("limited")
+                        || self.device_details.ecp_setting_mode.eq_ignore_ascii_case("disabled");
+                    let is_unreachable = !self.is_device_reachable && !self.selected_device_ip.is_empty();
+
+                    if is_limited || is_unreachable {
+                        ui.add_space(6.0);
+                        let (title, desc, border_color) = if is_limited {
+                            (
+                                "Mobile Control is Limited",
+                                "Roku is rejecting remote commands.\nEnable 'Control by mobile apps' in Roku TV settings.",
+                                egui::Color32::from_rgb(220, 150, 40),
+                            )
+                        } else {
+                            (
+                                "Roku Unreachable",
+                                "Unable to communicate with Roku over Wi-Fi.\nCheck TV power and verify network connection.",
+                                egui::Color32::from_rgb(220, 75, 65),
+                            )
+                        };
+
+                        egui::Frame::none()
+                            .fill(self.theme.lighter_background)
+                            .stroke(egui::Stroke::new(1.0f32, border_color))
+                            .rounding(6.0)
+                            .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        egui::RichText::new("\u{26A0}")
+                                            .size(16.0)
+                                            .color(border_color),
+                                    );
+                                    ui.add_space(4.0);
+                                    ui.vertical(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(title)
+                                                .strong()
+                                                .size(12.0)
+                                                .color(border_color),
+                                        );
+                                        ui.add_space(1.0);
+                                        ui.label(
+                                            egui::RichText::new(desc)
+                                                .size(11.0)
+                                                .color(self.theme.foreground),
+                                        );
+                                    });
+                                });
+                            });
                     }
 
                     ui.add_space(8.0);
                     ui.separator();
                     ui.horizontal(|ui| {
+                        if is_limited || is_unreachable {
+                            if ui.button("⚙ Setup Guide").clicked() {
+                                self.show_setup_guide = true;
+                            }
+                        }
+
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.button("Close").clicked() {
                                 self.show_device_info = false;
