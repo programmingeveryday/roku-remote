@@ -525,43 +525,48 @@ impl RokuRemoteApp {
                             visuals.bg_stroke,
                         );
 
-                        let inner_rect = rect.shrink2(egui::vec2(4.0, 4.0));
+                        let inner_rect = rect.shrink2(egui::vec2(6.0, 6.0));
 
                         let mut child_ui = ui.new_child(
                             egui::UiBuilder::new()
                                 .max_rect(inner_rect)
-                                .layout(egui::Layout::top_down(egui::Align::Center)),
+                                .layout(egui::Layout::centered_and_justified(egui::Direction::TopDown)),
                         );
 
                         if let Some(texture) = self.app_textures.get(&app.id) {
-                            child_ui.add_space(2.0);
-                            child_ui.image((texture.id(), egui::vec2(42.0, 42.0)));
-                            child_ui.add_space(3.0);
+                            // Icon takes up the full space of the card with aspect fit
+                            let tex_size = texture.size_vec2();
+                            let aspect = if tex_size.y > 0.0 { tex_size.x / tex_size.y } else { 1.0 };
+                            let max_w = inner_rect.width();
+                            let max_h = inner_rect.height();
+
+                            let img_size = if max_w / aspect <= max_h {
+                                egui::vec2(max_w, max_w / aspect)
+                            } else {
+                                egui::vec2(max_h * aspect, max_h)
+                            };
+
+                            child_ui.image((texture.id(), img_size));
                         } else {
-                            child_ui.add_space(8.0);
-                            child_ui.label(
-                                egui::RichText::new("📺")
-                                    .size(24.0),
-                            );
-                            child_ui.add_space(4.0);
-                        }
-
-                        let label = egui::Label::new(
-                            egui::RichText::new(&app.name)
-                                .size(11.0)
-                                .strong()
-                                .color(self.theme.foreground),
-                        )
-                        .wrap_mode(egui::TextWrapMode::Wrap)
-                        .selectable(false);
-
-                        child_ui.allocate_ui_with_layout(
-                            egui::vec2(inner_rect.width(), inner_rect.height() - 48.0),
-                            egui::Layout::centered_and_justified(egui::Direction::TopDown),
-                            |ui| {
+                            // Fallback when no icon is found: show TV icon + app name
+                            child_ui.vertical_centered(|ui| {
+                                ui.add_space(8.0);
+                                ui.label(
+                                    egui::RichText::new("📺")
+                                        .size(26.0),
+                                );
+                                ui.add_space(4.0);
+                                let label = egui::Label::new(
+                                    egui::RichText::new(&app.name)
+                                        .size(11.0)
+                                        .strong()
+                                        .color(self.theme.foreground),
+                                )
+                                .wrap_mode(egui::TextWrapMode::Wrap)
+                                .selectable(false);
                                 ui.add(label);
-                            },
-                        );
+                            });
+                        }
 
                         if (i + 1) % cols == 0 {
                             ui.end_row();
