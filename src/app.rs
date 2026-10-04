@@ -95,14 +95,14 @@ impl RokuRemoteApp {
     ) {
         thread::spawn(move || {
             loop {
-                thread::sleep(Duration::from_secs(3));
+                thread::sleep(Duration::from_secs(2));
                 let ip = {
                     let guard = shared_ip.lock().unwrap();
                     guard.clone()
                 };
                 if !ip.is_empty() {
-                    update_media_player_worker(&ip, &tx, &ctx);
                     update_device_name_worker(&ip, &tx, &ctx);
+                    update_media_player_worker(&ip, &tx, &ctx);
                 }
             }
         });
@@ -910,13 +910,19 @@ impl eframe::App for RokuRemoteApp {
                     }
                 };
 
-                let power_indicator_dot = if is_powered_on {
-                    egui::RichText::new("●").color(egui::Color32::from_rgb(46, 204, 113)).size(11.0) // Green on dot
+                let (power_dot_color, power_status_label) = if is_powered_on {
+                    (egui::Color32::from_rgb(46, 204, 113), "On")
                 } else {
-                    egui::RichText::new("●").color(egui::Color32::from_rgb(220, 60, 50)).size(11.0) // Red off dot
+                    (egui::Color32::from_rgb(220, 60, 50), "Off")
                 };
 
-                ui.label(power_indicator_dot);
+                ui.label(egui::RichText::new("●").color(power_dot_color).size(10.0));
+                ui.label(
+                    egui::RichText::new(power_status_label)
+                        .size(11.5)
+                        .strong()
+                        .color(power_dot_color),
+                );
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.add(egui::Button::new("Scan")).clicked() {
@@ -927,13 +933,13 @@ impl eframe::App for RokuRemoteApp {
 
                     let (power_text, power_bg) = if is_powered_on {
                         (
-                            "Power: On",
-                            egui::Color32::from_rgb(38, 150, 78), // Green
+                            "⏻ Power Off",
+                            egui::Color32::from_rgb(195, 55, 55), // Red button to power off / shut down
                         )
                     } else {
                         (
-                            "Power: Off",
-                            egui::Color32::from_rgb(190, 50, 50), // Muted Red
+                            "⏻ Power On",
+                            egui::Color32::from_rgb(38, 150, 78), // Green button to power on
                         )
                     };
 
