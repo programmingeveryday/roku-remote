@@ -337,13 +337,25 @@ impl RokuRemoteApp {
                     self.media_player = info;
                 }
                 BackgroundMessage::DeviceDetailsUpdated(details) => {
-                    if details.ecp_setting_mode.eq_ignore_ascii_case("limited") || details.ecp_setting_mode.eq_ignore_ascii_case("disabled") {
+                    let is_limited = details.ecp_setting_mode.eq_ignore_ascii_case("limited")
+                        || details.ecp_setting_mode.eq_ignore_ascii_case("disabled");
+                    if is_limited {
                         self.status_text = "Limited Mode - Setup Required".to_string();
+                    } else if self.apps.is_empty() && self.is_device_reachable && !self.is_refreshing_apps {
+                        self.refresh_apps();
                     }
                     self.device_details = details;
                 }
                 BackgroundMessage::PowerStateUpdated(reachable) => {
+                    let was_reachable = self.is_device_reachable;
                     self.is_device_reachable = reachable;
+                    if !was_reachable && reachable && self.apps.is_empty() && !self.is_refreshing_apps {
+                        let is_limited = self.device_details.ecp_setting_mode.eq_ignore_ascii_case("limited")
+                            || self.device_details.ecp_setting_mode.eq_ignore_ascii_case("disabled");
+                        if !is_limited {
+                            self.refresh_apps();
+                        }
+                    }
                 }
                 BackgroundMessage::AppIconLoaded { id, image } => {
                     self.pending_icons.push((id, image));
