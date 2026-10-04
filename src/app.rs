@@ -9,8 +9,8 @@ use crate::models::{
     default_popular_apps, AppItem, BackgroundMessage, DeviceDetails, MediaPlayerInfo, RokuDevice,
 };
 use crate::roku::client::{
-    load_app_icon_worker, start_scan, update_active_app_worker, update_apps_worker,
-    update_device_name_worker, update_media_player_worker,
+    load_app_icon_worker, refresh_apps_worker, start_scan, update_active_app_worker,
+    update_apps_worker, update_device_name_worker, update_media_player_worker,
 };
 use crate::theme::{apply_theme, load_omarchy_theme, start_theme_watcher, ThemeColors};
 
@@ -28,6 +28,7 @@ pub struct RokuRemoteApp {
     pub app_textures: HashMap<String, egui::TextureHandle>,
     pub pending_icons: Vec<(String, egui::ColorImage)>,
     pub is_scanning: bool,
+    pub is_refreshing_apps: bool,
     pub status_text: String,
     pub show_shortcuts: bool,
     pub theme: ThemeColors,
@@ -66,6 +67,7 @@ impl RokuRemoteApp {
             app_textures: HashMap::new(),
             pending_icons: Vec::new(),
             is_scanning: false,
+            is_refreshing_apps: false,
             status_text: "Ready".to_string(),
             show_shortcuts: false,
             theme,
@@ -219,6 +221,21 @@ impl RokuRemoteApp {
         });
     }
 
+    pub fn refresh_apps(&mut self) {
+        if self.selected_device_ip.is_empty() {
+            self.status_text = "No device connected".to_string();
+            return;
+        }
+        self.is_refreshing_apps = true;
+        self.status_text = "Checking apps...".to_string();
+        let ip = self.selected_device_ip.clone();
+        let tx = self.tx.clone();
+        let ctx = self.ctx.clone();
+        thread::spawn(move || {
+            refresh_apps_worker(&ip, &tx, &ctx);
+        });
+    }
+
     pub fn handle_incoming_messages(&mut self, ctx: &egui::Context) {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
@@ -242,6 +259,17 @@ impl RokuRemoteApp {
                         self.fetch_app_icons(&apps);
                         self.apps = apps;
                     }
+                }
+                BackgroundMessage::AppsListRefreshed(apps) => {
+                    self.is_refreshing_apps = false;
+                    let count = apps.len();
+                    self.fetch_app_icons(&apps);
+                    self.apps = apps;
+                    self.status_text = format!("Updated {} apps", count);
+                }
+                BackgroundMessage::AppsRefreshFailed => {
+                    self.is_refreshing_apps = false;
+                    self.status_text = "Failed to refresh apps".to_string();
                 }
                 BackgroundMessage::ScanFinished => {
                     self.is_scanning = false;
@@ -427,7 +455,8 @@ impl RokuRemoteApp {
         });
     }
 
-    pub fn render_apps_section(&self, ui: &mut egui::Ui, is_wide_layout: bool) {
+    pub fn render_apps_section(&mut self, ui: &mut egui::Ui, is_wide_layout: bool) {
+        let mut do_refresh_apps = false;
         ui.horizontal(|ui| {
             ui.label(
                 egui::RichText::new("Quick Launch Apps")
@@ -436,13 +465,30 @@ impl RokuRemoteApp {
                     .color(self.theme.foreground),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let refresh_text = if self.is_refreshing_apps {
+                    "⏳ Checking..."
+                } else {
+                    "🔄 Refresh Apps"
+                };
+                let btn = egui::Button::new(
+                    egui::RichText::new(refresh_text)
+                        .size(11.0)
+                        .color(self.theme.foreground),
+                );
+                if ui.add_enabled(!self.is_refreshing_apps, btn).clicked() {
+                    do_refresh_apps = true;
+                }
+
                 ui.label(
-                    egui::RichText::new(format!("{} apps", self.apps.len()))
+                    egui::RichText::new(format!("{} apps •", self.apps.len()))
                         .size(11.0)
                         .color(self.theme.dark_foreground),
                 );
             });
         });
+        if do_refresh_apps {
+            self.refresh_apps();
+        }
         ui.add_space(6.0);
 
         let mut app_to_launch = None;
@@ -542,6 +588,7 @@ impl RokuRemoteApp {
     pub fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
         let (
             ctrl,
+            shift,
             key_up,
             key_down,
             key_left,
@@ -555,10 +602,12 @@ impl RokuRemoteApp {
             key_i,
             key_m,
             key_p,
+            key_a,
             key_comma,
         ) = ctx.input(|i| {
             (
                 i.modifiers.ctrl,
+                i.modifiers.shift,
                 i.key_pressed(egui::Key::ArrowUp),
                 i.key_pressed(egui::Key::ArrowDown),
                 i.key_pressed(egui::Key::ArrowLeft),
@@ -572,6 +621,7 @@ impl RokuRemoteApp {
                 i.key_pressed(egui::Key::I),
                 i.key_pressed(egui::Key::M),
                 i.key_pressed(egui::Key::P),
+                i.key_pressed(egui::Key::A),
                 i.key_pressed(egui::Key::Comma),
             )
         });
@@ -590,7 +640,9 @@ impl RokuRemoteApp {
 
         // Navigation & Media / Volume
         if ctrl {
-            if key_right {
+            if (shift && key_r) || key_a {
+                self.refresh_apps();
+            } else if key_right {
                 self.send_key("Fwd"); // Fast Forward
             } else if key_left {
                 self.send_key("Rev"); // Rewind
@@ -702,6 +754,11 @@ impl eframe::App for RokuRemoteApp {
                             ui.label("🔇");
                             ui.label(egui::RichText::new("Ctrl + M").strong().color(self.theme.accent));
                             ui.label(egui::RichText::new("Mute").color(self.theme.foreground));
+                            ui.end_row();
+
+                            ui.label("🔄");
+                            ui.label(egui::RichText::new("Ctrl + Shift + R").strong().color(self.theme.accent));
+                            ui.label(egui::RichText::new("Refresh Quick Launch Apps").color(self.theme.foreground));
                             ui.end_row();
 
                             ui.label("💡");

@@ -34,6 +34,8 @@ pub enum BackgroundMessage {
     DeviceNameUpdated(String),
     ActiveAppUpdated(String),
     AppsListUpdated(Vec<AppItem>),
+    AppsListRefreshed(Vec<AppItem>),
+    AppsRefreshFailed,
     ScanFinished,
     ThemeUpdated(crate::theme::ThemeColors),
     MediaPlayerUpdated(MediaPlayerInfo),
