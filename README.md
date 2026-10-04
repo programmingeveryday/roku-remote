@@ -2,9 +2,7 @@
 
 A modern, fast, lightweight, and cross-platform native desktop remote control for Roku streaming sticks and Smart TVs. Written in **Rust** using **egui / eframe**.
 
-| Wide Screen Layout (Side-by-Side View) | Compact / Narrow Window View |
-| :---: | :---: |
-| ![Roku Remote Wide](docs/images/screenshot-wide.png) | ![Roku Remote Compact](docs/images/screenshot-narrow.png) |
+![Roku Remote](docs/images/screenshot-wide.png)
 
 ---
 
@@ -28,8 +26,7 @@ A modern, fast, lightweight, and cross-platform native desktop remote control fo
   - Channel list and decoded icons are cached locally (`~/.cache/roku-remote-rs/icons/`), enabling instant rendering on startup without waiting for network queries.
   - Dedicated **`🔄 Refresh Apps`** button (and shortcut) to rescan and update installed channels anytime.
 - **Adaptive Responsive Layout**:
-  - **Wide screens (>=680px)**: Side-by-side view with remote controls on the left and full apps grid on the right.
-  - **Compact screens**: Vertically scrolling layout optimized for narrow windows.
+  - Automatically transitions between a two-column wide view and a compact single-column view based on window width.
 - **Full Keyboard Control & Shortcut Cheat Sheet**:
   - Direct keyboard control for navigation, volume, playback, and app refresh.
   - Built-in shortcuts cheat sheet modal (`Ctrl + ,` or `Esc` to close).
@@ -39,6 +36,23 @@ A modern, fast, lightweight, and cross-platform native desktop remote control fo
   - Inspect model name, model number, software version, Wi-Fi network, UI resolution, power mode, IP address, and live/sleeping App Status.
 - **Modular & Idiomatic Rust Architecture**:
   - Refactored into clean modules (`app`, `models`, `roku::client`, `roku::parser`, `theme`) with 100% unit test coverage for XML parsers and color utilities.
+
+---
+
+## 📱 Responsive Adaptive Layout
+
+Roku Remote dynamically detects window width and automatically reflows its user interface:
+
+* **Wide Screen Mode (window width ≥ 680px)**: 
+  Splits into two side-by-side columns. Remote navigation and media playback controls remain pinned on the left (`300px`), while the full grid of quick-launch channel cards expands across the right side.
+* **Compact / Narrow Window Mode (window width < 680px)**: 
+  Automatically transitions into a single-column, vertically scrollable layout. This mode is designed for tiling window managers (such as Hyprland, Sway, or i3), side panels, or snapping the remote beside another active window.
+
+<p align="center">
+  <img src="docs/images/screenshot-narrow.png" width="460" alt="Roku Remote Compact View" />
+  <br/>
+  <em>Automatic single-column reflow when window is resized below 680px</em>
+</p>
 
 ---
 
