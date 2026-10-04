@@ -8,7 +8,8 @@ A modern, fast, lightweight, and cross-platform native desktop remote control fo
 
 ## ✨ Features
 
-- **Automatic Device Discovery**: Uses UPnP / SSDP UDP multicast (`M-SEARCH roku:ecp`) and automatic TCP network probes to locate Roku devices on your local Wi-Fi / LAN.
+- **Multi-Device Discovery & Selector**: Automatically discovers all Roku devices on your local Wi-Fi / LAN via SSDP UDP multicast and parallel multi-threaded subnet probes. Includes an interactive dropdown selector to switch between multiple Rokus across different rooms, as well as a manual IP entry mode.
+- **In-App Setup Guide & Permission Alerts**: Built-in interactive setup guide modal (`⚙ Setup`) and automatic warning banners if a Roku's Mobile App Control is in "Limited" mode, providing step-by-step instructions to enable network control.
 - **Full Navigation D-Pad**: Vector-rendered arrow keys (`▲`, `▼`, `◄`, `►`), `OK / Select`, `Home`, `Back`, `Instant Replay`, and `Options / Info (*)`.
 - **Media & Volume Control**: Dedicated playback row (`<<`, `Play / Pause`, `>>`), `Volume Up`, `Volume Down`, and `Mute`.
 - **Live Playback State & Dynamic Play/Pause Button**: Real-time status indicator (`▶ Playing`, `⏸ Paused`, `⏳ Buffering`) paired with a context-aware Play/Pause button that dynamically changes label and color (green for playing, amber for paused).
