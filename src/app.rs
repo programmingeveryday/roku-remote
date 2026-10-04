@@ -336,7 +336,8 @@ impl RokuRemoteApp {
             ui.add_space(6.0);
 
             // Row 2: UP
-            if ui.add_sized(btn_dir, egui::Button::new("Up")).clicked() {
+            let up_btn = egui::Button::new(egui::RichText::new("▲").size(15.0));
+            if ui.add_sized(btn_dir, up_btn).clicked() {
                 self.send_key("Up");
             }
 
@@ -348,7 +349,8 @@ impl RokuRemoteApp {
                 let pad = ((width - row_w) / 2.0).max(0.0);
                 ui.add_space(pad);
 
-                if ui.add_sized(btn_dir, egui::Button::new("Left")).clicked() {
+                let left_btn = egui::Button::new(egui::RichText::new("◀").size(15.0));
+                if ui.add_sized(btn_dir, left_btn).clicked() {
                     self.send_key("Left");
                 }
 
@@ -363,7 +365,8 @@ impl RokuRemoteApp {
                     self.send_key("Select");
                 }
 
-                if ui.add_sized(btn_dir, egui::Button::new("Right")).clicked() {
+                let right_btn = egui::Button::new(egui::RichText::new("▶").size(15.0));
+                if ui.add_sized(btn_dir, right_btn).clicked() {
                     self.send_key("Right");
                 }
             });
@@ -371,7 +374,8 @@ impl RokuRemoteApp {
             ui.add_space(6.0);
 
             // Row 4: DOWN
-            if ui.add_sized(btn_dir, egui::Button::new("Down")).clicked() {
+            let down_btn = egui::Button::new(egui::RichText::new("▼").size(15.0));
+            if ui.add_sized(btn_dir, down_btn).clicked() {
                 self.send_key("Down");
             }
 
