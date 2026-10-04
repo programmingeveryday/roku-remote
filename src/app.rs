@@ -760,16 +760,41 @@ impl RokuRemoteApp {
     }
 }
 
+fn is_hyprland_focused() -> Option<bool> {
+    let sig = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok()?;
+    let xdg = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/run/user/1000".to_string());
+    let sock_path = format!("{}/hypr/{}/.socket.sock", xdg, sig);
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+    let mut stream = UnixStream::connect(sock_path).ok()?;
+    stream.set_read_timeout(Some(std::time::Duration::from_millis(20))).ok()?;
+    stream.set_write_timeout(Some(std::time::Duration::from_millis(20))).ok()?;
+    stream.write_all(b"j/activewindow").ok()?;
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf);
+    let my_pid = std::process::id();
+    Some(text.contains(&format!("\"pid\": {}", my_pid)))
+}
+
 impl eframe::App for RokuRemoteApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let (is_minimized, is_focused, has_events) = ctx.input(|i| {
-            let minimized = i.viewport().minimized.unwrap_or(false);
-            let focused = i.focused;
-            let events = !i.raw.events.is_empty();
-            (minimized, focused, events)
+        let window_rect = ctx.screen_rect();
+        let has_user_input = ctx.input(|i| {
+            i.raw.events.iter().any(|e| match e {
+                egui::Event::PointerMoved(pos) => window_rect.contains(*pos),
+                egui::Event::PointerButton { .. }
+                | egui::Event::Key { .. }
+                | egui::Event::Text(_)
+                | egui::Event::MouseWheel { .. } => true,
+                _ => false,
+            })
         });
 
-        if has_events && !is_minimized {
+        let is_minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+        let is_focused = is_hyprland_focused().unwrap_or_else(|| ctx.input(|i| i.focused));
+
+        if has_user_input && !is_minimized {
             self.last_active = Instant::now();
         }
 
@@ -777,9 +802,9 @@ impl eframe::App for RokuRemoteApp {
         let is_active_now = if is_minimized {
             false
         } else if !is_focused {
-            self.last_active.elapsed() < Duration::from_secs(10)
+            self.last_active.elapsed() < Duration::from_secs(3)
         } else {
-            self.last_active.elapsed() < Duration::from_secs(120)
+            self.last_active.elapsed() < Duration::from_secs(10)
         };
 
         if is_active_now != was_active {
@@ -790,9 +815,16 @@ impl eframe::App for RokuRemoteApp {
             }
         }
 
-        // When nearing idle timeout, request a repaint so state transition can occur
-        if is_active_now && (!is_focused || self.last_active.elapsed() > Duration::from_secs(10)) {
-            ctx.request_repaint_after(Duration::from_secs(1));
+        // When active and nearing idle timeout, request a repaint so state transition triggers
+        if is_active_now {
+            let timeout = if is_focused {
+                Duration::from_secs(10)
+            } else {
+                Duration::from_secs(3)
+            };
+            if self.last_active.elapsed() < timeout {
+                ctx.request_repaint_after(Duration::from_secs(1));
+            }
         }
 
         self.handle_incoming_messages(ctx);
@@ -1055,12 +1087,46 @@ impl eframe::App for RokuRemoteApp {
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let display_status = if !self.is_active.load(Ordering::Relaxed) {
-                        "💤 Sleeping".to_string()
+                    let is_sleeping = !self.is_active.load(Ordering::Relaxed);
+                    let badge_btn = if is_sleeping {
+                        egui::Button::new(
+                            egui::RichText::new("💤 Sleeping")
+                                .size(11.0)
+                                .color(egui::Color32::from_rgb(175, 185, 205)),
+                        )
+                        .fill(egui::Color32::from_rgb(45, 52, 68))
                     } else {
-                        self.status_text.clone()
+                        egui::Button::new(
+                            egui::RichText::new("● Live")
+                                .size(11.0)
+                                .color(egui::Color32::from_rgb(75, 210, 115)),
+                        )
+                        .fill(egui::Color32::from_rgb(30, 52, 40))
                     };
-                    ui.label(egui::RichText::new(&display_status).color(self.theme.dark_foreground).size(11.0));
+
+                    let badge_tooltip = if is_sleeping {
+                        "Sleeping: background queries paused.\nClick to wake up immediately."
+                    } else {
+                        "Live: auto-refreshing.\nClick to sleep immediately."
+                    };
+
+                    if ui.add(badge_btn).on_hover_text(badge_tooltip).clicked() {
+                        if is_sleeping {
+                            self.is_active.store(true, Ordering::Relaxed);
+                            self.last_active = Instant::now();
+                            self.refresh_device_info();
+                        } else {
+                            self.is_active.store(false, Ordering::Relaxed);
+                            self.last_active = Instant::now() - Duration::from_secs(60);
+                        }
+                    }
+
+                    ui.add_space(8.0);
+                    ui.label(
+                        egui::RichText::new(&self.status_text)
+                            .color(self.theme.dark_foreground)
+                            .size(11.0),
+                    );
                 });
             });
 
