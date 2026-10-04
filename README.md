@@ -2,19 +2,24 @@
 
 A modern, fast, lightweight, and cross-platform native desktop remote control for Roku streaming sticks and Smart TVs. Written in **Rust** using **egui / eframe**.
 
-![Roku Remote Screenshot](docs/images/screenshot.png)
+| Wide Screen Layout (Side-by-Side View) | Compact / Narrow Window View |
+| :---: | :---: |
+| ![Roku Remote Wide](docs/images/screenshot-wide.png) | ![Roku Remote Compact](docs/images/screenshot-narrow.png) |
 
 ---
 
 ## ✨ Features
 
 - **Automatic Device Discovery**: Uses UPnP / SSDP UDP multicast (`M-SEARCH roku:ecp`) and automatic TCP network probes to locate Roku devices on your local Wi-Fi / LAN.
-- **Full Navigation D-Pad**: `Up`, `Down`, `Left`, `Right`, `OK / Select`, `Home`, `Back`, `Instant Replay`, and `Options / Info (*)`.
-- **Media & Volume Control**: `Play / Pause`, `Fast Forward`, `Rewind`, `Volume Up`, `Volume Down`, and `Mute`.
+- **Full Navigation D-Pad**: Vector-rendered arrow keys (`▲`, `▼`, `◄`, `►`), `OK / Select`, `Home`, `Back`, `Instant Replay`, and `Options / Info (*)`.
+- **Media & Volume Control**: Dedicated playback row (`<<`, `Play / Pause`, `>>`), `Volume Up`, `Volume Down`, and `Mute`.
 - **Live Playback State & Dynamic Play/Pause Button**: Real-time status indicator (`▶ Playing`, `⏸ Paused`, `⏳ Buffering`) paired with a context-aware Play/Pause button that dynamically changes label and color (green for playing, amber for paused).
 - **Power State Indicator & Instant Power Toggle**:
-  - Live status indicator (green `●` for On, red `●` for Off).
-  - Optimistic, responsive power toggle button with multi-stage verification against Roku's `/query/device-info` endpoint.
+  - Live status indicator with crisp vector computer power symbol (green for On, red for Off).
+  - High-visibility action button (`Power Off` in red / `Power On` in green) with vector power icon and multi-stage verification against Roku's `/query/device-info` endpoint.
+- **True Sleep State & Zero Idle Overhead**:
+  - Automatically enters deep sleep mode when minimized (instant), unfocused (3s), or idle (10s), stopping all background network queries and file polling (0% CPU, 0 network requests).
+  - Wakes up instantly on user interaction and updates status.
 - **Quick Launch Apps with High-Res Channel Icons**:
   - Automatically queries all installed channels on the Roku device.
   - Full-bleed app cards displaying high-res icons (supports both PNG and JPEG formats, including Netflix, Prime Video, YouTube, Disney+, Hulu, HBO Max, etc.).
@@ -31,7 +36,7 @@ A modern, fast, lightweight, and cross-platform native desktop remote control fo
 - **Omarchy / System Desktop Theme Integration**:
   - Automatically detects and matches Omarchy system themes (`colors.toml`) with live hot-reloading.
 - **Device Details Modal**:
-  - Inspect model name, model number, software version, Wi-Fi network, UI resolution, power mode, and IP address.
+  - Inspect model name, model number, software version, Wi-Fi network, UI resolution, power mode, IP address, and live/sleeping App Status.
 - **Modular & Idiomatic Rust Architecture**:
   - Refactored into clean modules (`app`, `models`, `roku::client`, `roku::parser`, `theme`) with 100% unit test coverage for XML parsers and color utilities.
 
