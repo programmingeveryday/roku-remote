@@ -283,17 +283,24 @@ pub fn update_apps_worker(ip: &str, tx: &Sender<BackgroundMessage>, ctx: &egui::
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_millis(1500))
         .build();
+    let mut sent = false;
     if let Ok(c) = client {
         if let Ok(resp) = c.get(&url).send() {
-            if let Ok(text) = resp.text() {
-                let parsed = parse_apps_xml(&text);
-                if !parsed.is_empty() {
-                    save_cached_apps(&parsed);
-                    let _ = tx.send(BackgroundMessage::AppsListUpdated(parsed));
-                    ctx.request_repaint();
+            if resp.status().is_success() {
+                if let Ok(text) = resp.text() {
+                    let parsed = parse_apps_xml(&text);
+                    if !parsed.is_empty() {
+                        let _ = tx.send(BackgroundMessage::AppsListUpdated(parsed));
+                        ctx.request_repaint();
+                        sent = true;
+                    }
                 }
             }
         }
+    }
+    if !sent {
+        let _ = tx.send(BackgroundMessage::AppsRefreshFailed);
+        ctx.request_repaint();
     }
 }
 
@@ -305,13 +312,14 @@ pub fn refresh_apps_worker(ip: &str, tx: &Sender<BackgroundMessage>, ctx: &egui:
     let mut sent = false;
     if let Ok(c) = client {
         if let Ok(resp) = c.get(&url).send() {
-            if let Ok(text) = resp.text() {
-                let parsed = parse_apps_xml(&text);
-                if !parsed.is_empty() {
-                    save_cached_apps(&parsed);
-                    let _ = tx.send(BackgroundMessage::AppsListRefreshed(parsed));
-                    ctx.request_repaint();
-                    sent = true;
+            if resp.status().is_success() {
+                if let Ok(text) = resp.text() {
+                    let parsed = parse_apps_xml(&text);
+                    if !parsed.is_empty() {
+                        let _ = tx.send(BackgroundMessage::AppsListRefreshed(parsed));
+                        ctx.request_repaint();
+                        sent = true;
+                    }
                 }
             }
         }

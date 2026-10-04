@@ -6,7 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::models::{
-    default_popular_apps, AppItem, BackgroundMessage, DeviceDetails, MediaPlayerInfo, RokuDevice,
+    AppItem, BackgroundMessage, DeviceDetails, MediaPlayerInfo, RokuDevice,
 };
 use crate::roku::client::{
     load_app_icon_worker, refresh_apps_worker, start_scan, update_active_app_worker,
@@ -68,9 +68,6 @@ impl RokuRemoteApp {
             is_active.clone(),
         );
 
-        let initial_apps = crate::roku::client::load_cached_apps()
-            .unwrap_or_else(default_popular_apps);
-
         let app = Self {
             devices: Vec::new(),
             selected_device_ip: initial_ip,
@@ -85,11 +82,11 @@ impl RokuRemoteApp {
             show_device_info: false,
             show_setup_guide: false,
             manual_ip_mode: false,
-            apps: initial_apps.clone(),
+            apps: Vec::new(),
             app_textures: HashMap::new(),
             pending_icons: Vec::new(),
             is_scanning: true,
-            is_refreshing_apps: false,
+            is_refreshing_apps: true,
             status_text: "Discovering Rokus...".to_string(),
             show_shortcuts: false,
             theme,
@@ -97,9 +94,6 @@ impl RokuRemoteApp {
             rx,
             tx,
         };
-
-        // Immediately load any cached icons for the apps list so they are ready on launch
-        app.fetch_app_icons(&initial_apps);
 
         app.start_discovery_scan();
         app.refresh_device_info();
@@ -117,6 +111,10 @@ impl RokuRemoteApp {
         }
         crate::roku::client::save_cached_last_ip(ip);
         self.status_text = format!("Connected to {}", ip);
+        // Clear previous applications so we don't display stale apps
+        self.apps.clear();
+        self.app_textures.clear();
+        self.is_refreshing_apps = true;
         self.refresh_device_info();
     }
 
@@ -307,10 +305,9 @@ impl RokuRemoteApp {
                     self.active_app = app;
                 }
                 BackgroundMessage::AppsListUpdated(apps) => {
-                    if !apps.is_empty() {
-                        self.fetch_app_icons(&apps);
-                        self.apps = apps;
-                    }
+                    self.is_refreshing_apps = false;
+                    self.fetch_app_icons(&apps);
+                    self.apps = apps;
                 }
                 BackgroundMessage::AppsListRefreshed(apps) => {
                     self.is_refreshing_apps = false;
@@ -321,7 +318,8 @@ impl RokuRemoteApp {
                 }
                 BackgroundMessage::AppsRefreshFailed => {
                     self.is_refreshing_apps = false;
-                    self.status_text = "Failed to refresh apps".to_string();
+                    self.apps.clear();
+                    self.app_textures.clear();
                 }
                 BackgroundMessage::ScanFinished => {
                     self.is_scanning = false;
@@ -588,17 +586,53 @@ impl RokuRemoteApp {
                     do_refresh_apps = true;
                 }
 
-                ui.label(
-                    egui::RichText::new(format!("{} apps •", self.apps.len()))
-                        .size(11.0)
-                        .color(self.theme.dark_foreground),
-                );
+                if !self.apps.is_empty() {
+                    ui.label(
+                        egui::RichText::new(format!("{} apps •", self.apps.len()))
+                            .size(11.0)
+                            .color(self.theme.dark_foreground),
+                    );
+                }
             });
         });
         if do_refresh_apps {
             self.refresh_apps();
         }
         ui.add_space(6.0);
+
+        if self.apps.is_empty() {
+            ui.add_space(24.0);
+            ui.vertical_centered(|ui| {
+                if self.is_refreshing_apps {
+                    ui.spinner();
+                    ui.add_space(8.0);
+                    ui.label(
+                        egui::RichText::new("Scanning for installed applications...")
+                            .color(self.theme.dark_foreground)
+                            .size(12.0),
+                    );
+                } else {
+                    let is_limited = self.is_device_reachable
+                        && (self.device_details.ecp_setting_mode.eq_ignore_ascii_case("limited")
+                            || self.device_details.ecp_setting_mode.eq_ignore_ascii_case("disabled"));
+
+                    if is_limited {
+                        ui.label(
+                            egui::RichText::new("No applications available (commands blocked in Limited mode)")
+                                .color(self.theme.dark_foreground)
+                                .size(12.0),
+                        );
+                    } else {
+                        ui.label(
+                            egui::RichText::new("No applications available for this device")
+                                .color(self.theme.dark_foreground)
+                                .size(12.0),
+                        );
+                    }
+                }
+            });
+            return;
+        }
 
         let mut app_to_launch = None;
 
