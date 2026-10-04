@@ -29,6 +29,8 @@ pub struct RokuRemoteApp {
     pub device_details: DeviceDetails,
     pub is_device_reachable: bool,
     pub show_device_info: bool,
+    pub show_setup_guide: bool,
+    pub manual_ip_mode: bool,
     pub apps: Vec<AppItem>,
     pub app_textures: HashMap<String, egui::TextureHandle>,
     pub pending_icons: Vec<(String, egui::ColorImage)>,
@@ -56,7 +58,9 @@ impl RokuRemoteApp {
         let (tx, rx) = channel();
         start_theme_watcher(tx.clone(), cc.egui_ctx.clone(), is_active.clone());
 
-        let shared_ip = Arc::new(Mutex::new("192.168.0.108".to_string()));
+        let initial_ip = crate::roku::client::load_cached_last_ip()
+            .unwrap_or_else(|| "192.168.0.31".to_string());
+        let shared_ip = Arc::new(Mutex::new(initial_ip.clone()));
         Self::start_playback_watcher(
             shared_ip.clone(),
             tx.clone(),
@@ -69,22 +73,24 @@ impl RokuRemoteApp {
 
         let app = Self {
             devices: Vec::new(),
-            selected_device_ip: "192.168.0.108".to_string(),
+            selected_device_ip: initial_ip,
             shared_ip,
             is_active,
             last_active: Instant::now(),
-            device_name: "Roku Streaming Stick Plus".to_string(),
+            device_name: "Roku Device".to_string(),
             active_app: "Loading...".to_string(),
             media_player: MediaPlayerInfo::default(),
             device_details: DeviceDetails::default(),
-            is_device_reachable: true,
+            is_device_reachable: false,
             show_device_info: false,
+            show_setup_guide: false,
+            manual_ip_mode: false,
             apps: initial_apps.clone(),
             app_textures: HashMap::new(),
             pending_icons: Vec::new(),
-            is_scanning: false,
+            is_scanning: true,
             is_refreshing_apps: false,
-            status_text: "Ready".to_string(),
+            status_text: "Discovering Rokus...".to_string(),
             show_shortcuts: false,
             theme,
             ctx: cc.egui_ctx.clone(),
@@ -99,6 +105,19 @@ impl RokuRemoteApp {
         app.refresh_device_info();
 
         app
+    }
+
+    pub fn select_device(&mut self, ip: &str) {
+        self.selected_device_ip = ip.to_string();
+        if let Some(dev) = self.devices.iter().find(|d| d.ip == ip) {
+            self.device_name = dev.name.clone();
+        }
+        if let Ok(mut guard) = self.shared_ip.lock() {
+            *guard = ip.to_string();
+        }
+        crate::roku::client::save_cached_last_ip(ip);
+        self.status_text = format!("Connected to {}", ip);
+        self.refresh_device_info();
     }
 
     fn start_playback_watcher(
@@ -218,6 +237,9 @@ impl RokuRemoteApp {
     }
 
     pub fn refresh_device_info(&self) {
+        if self.selected_device_ip.is_empty() {
+            return;
+        }
         if let Ok(mut guard) = self.shared_ip.lock() {
             *guard = self.selected_device_ip.clone();
         }
@@ -263,16 +285,23 @@ impl RokuRemoteApp {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 BackgroundMessage::DeviceDiscovered(dev) => {
-                    if !self.devices.iter().any(|d| d.ip == dev.ip) {
-                        self.devices.push(dev);
+                    if let Some(existing) = self.devices.iter_mut().find(|d| d.ip == dev.ip) {
+                        existing.name = dev.name.clone();
+                    } else {
+                        self.devices.push(dev.clone());
                     }
-                    if self.selected_device_ip.is_empty() && !self.devices.is_empty() {
-                        self.selected_device_ip = self.devices[0].ip.clone();
-                        self.refresh_device_info();
+                    if self.selected_device_ip == dev.ip {
+                        self.device_name = dev.name.clone();
+                    }
+                    if (self.selected_device_ip.is_empty() || !self.is_device_reachable) && !self.devices.is_empty() {
+                        self.select_device(&dev.ip);
                     }
                 }
                 BackgroundMessage::DeviceNameUpdated(name) => {
-                    self.device_name = name;
+                    self.device_name = name.clone();
+                    if let Some(d) = self.devices.iter_mut().find(|d| d.ip == self.selected_device_ip) {
+                        d.name = name;
+                    }
                 }
                 BackgroundMessage::ActiveAppUpdated(app) => {
                     self.active_app = app;
@@ -296,7 +325,11 @@ impl RokuRemoteApp {
                 }
                 BackgroundMessage::ScanFinished => {
                     self.is_scanning = false;
-                    self.status_text = format!("Found {} device(s)", self.devices.len());
+                    if self.devices.is_empty() {
+                        self.status_text = "No Roku devices found".to_string();
+                    } else {
+                        self.status_text = format!("Found {} Roku(s)", self.devices.len());
+                    }
                 }
                 BackgroundMessage::ThemeUpdated(theme) => {
                     apply_theme(ctx, &theme);
@@ -306,6 +339,9 @@ impl RokuRemoteApp {
                     self.media_player = info;
                 }
                 BackgroundMessage::DeviceDetailsUpdated(details) => {
+                    if details.ecp_setting_mode.eq_ignore_ascii_case("limited") || details.ecp_setting_mode.eq_ignore_ascii_case("disabled") {
+                        self.status_text = "Limited Mode - Setup Required".to_string();
+                    }
                     self.device_details = details;
                 }
                 BackgroundMessage::PowerStateUpdated(reachable) => {
@@ -710,9 +746,11 @@ impl RokuRemoteApp {
             return;
         }
 
-        // Escape closes shortcuts dialog if open
-        if key_escape && self.show_shortcuts {
+        // Escape closes any open modal dialog
+        if key_escape && (self.show_shortcuts || self.show_device_info || self.show_setup_guide) {
             self.show_shortcuts = false;
+            self.show_device_info = false;
+            self.show_setup_guide = false;
             return;
         }
 
@@ -981,11 +1019,13 @@ impl eframe::App for RokuRemoteApp {
                             row("Device Name:", &self.device_name);
                             row("Model Name:", &self.device_details.model_name);
                             row("Model Number:", &self.device_details.model_number);
+                            row("Location:", &self.device_details.user_location);
                             row("Software Version:", &self.device_details.software_version);
                             row("Wi-Fi Network:", &self.device_details.network_name);
                             row("Display Resolution:", &self.device_details.ui_resolution);
                             row("Power Mode:", &self.device_details.power_mode);
                             row("IP Address:", &self.selected_device_ip);
+                            row("Mobile App Control:", &self.device_details.ecp_setting_mode);
 
                             let is_active = self.is_active.load(Ordering::Relaxed);
                             ui.label(egui::RichText::new("App Status:").strong().color(self.theme.accent));
@@ -1028,12 +1068,186 @@ impl eframe::App for RokuRemoteApp {
                             ui.end_row();
                         });
 
+                    if self.device_details.ecp_setting_mode.eq_ignore_ascii_case("limited")
+                        || self.device_details.ecp_setting_mode.eq_ignore_ascii_case("disabled")
+                    {
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new("⚠️ Mobile control is limited. Commands cannot be sent.")
+                                    .color(egui::Color32::from_rgb(240, 160, 40))
+                                    .size(11.5),
+                            );
+                            if ui.button("⚙ Setup Guide").clicked() {
+                                self.show_setup_guide = true;
+                            }
+                        });
+                    }
+
                     ui.add_space(8.0);
                     ui.separator();
                     ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.button("Close").clicked() {
                                 self.show_device_info = false;
+                            }
+                        });
+                    });
+                });
+        }
+
+        // Roku Setup Guide Modal Window
+        if self.show_setup_guide {
+            egui::Window::new("⚙ Roku Setup & Troubleshooting Guide")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .default_width(450.0)
+                .show(ctx, |ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
+
+                    ui.heading("Connect & Enable Roku Remote Access");
+                    ui.label(
+                        egui::RichText::new("Follow these steps if your Roku is not discovered or commands are not responding:")
+                            .color(self.theme.foreground),
+                    );
+                    ui.separator();
+
+                    egui::ScrollArea::vertical()
+                        .max_height(360.0)
+                        .show(ui, |ui| {
+                            // Section 1: Enable Mobile App Control (ECP)
+                            ui.label(
+                                egui::RichText::new("1. Enable Mobile App Control (ECP)")
+                                    .strong()
+                                    .size(13.5)
+                                    .color(self.theme.accent),
+                            );
+                            ui.label(
+                                egui::RichText::new("Roku requires external control permission. In 'Limited' mode, commands like Keypress and App launch are rejected by Roku:")
+                                    .size(11.5)
+                                    .color(self.theme.foreground),
+                            );
+
+                            egui::Frame::none()
+                                .fill(self.theme.lighter_background)
+                                .rounding(4.0)
+                                .inner_margin(8.0)
+                                .show(ui, |ui| {
+                                    egui::Grid::new("setup_steps_grid")
+                                        .spacing([8.0, 4.0])
+                                        .show(ui, |ui| {
+                                            ui.label(egui::RichText::new("Step 1:").strong().color(self.theme.accent));
+                                            ui.label("Using your physical Roku TV remote, press Home (🏠).");
+                                            ui.end_row();
+
+                                            ui.label(egui::RichText::new("Step 2:").strong().color(self.theme.accent));
+                                            ui.label("Navigate to Settings (⚙) → System.");
+                                            ui.end_row();
+
+                                            ui.label(egui::RichText::new("Step 3:").strong().color(self.theme.accent));
+                                            ui.label("Select Advanced system settings.");
+                                            ui.end_row();
+
+                                            ui.label(egui::RichText::new("Step 4:").strong().color(self.theme.accent));
+                                            ui.label("Select Control by mobile apps → Network access.");
+                                            ui.end_row();
+
+                                            ui.label(egui::RichText::new("Step 5:").strong().color(self.theme.accent));
+                                            ui.label("Select 'Default' or 'Permissive' (do not leave on 'Limited').");
+                                            ui.end_row();
+                                        });
+                                });
+
+                            ui.add_space(6.0);
+
+                            // Section 2: Wi-Fi Network & Router
+                            ui.label(
+                                egui::RichText::new("2. Wi-Fi & Subnet Setup")
+                                    .strong()
+                                    .size(13.5)
+                                    .color(self.theme.accent),
+                            );
+                            ui.label(
+                                egui::RichText::new("• Ensure your computer and Roku are connected to the exact same Wi-Fi network.\n• Verify router does not have 'AP Isolation' / 'Client Isolation' enabled.")
+                                    .size(11.5)
+                                    .color(self.theme.foreground),
+                            );
+
+                            ui.add_space(6.0);
+
+                            // Section 3: Manual IP Entry
+                            ui.label(
+                                egui::RichText::new("3. Find Your Roku IP Manually")
+                                    .strong()
+                                    .size(13.5)
+                                    .color(self.theme.accent),
+                            );
+                            ui.label(
+                                egui::RichText::new("If your router blocks discovery broadcasts:\n• On Roku: Settings → Network → About → IP address.\n• In this app: Select '✏ Enter IP manually' in the device selector dropdown.")
+                                    .size(11.5)
+                                    .color(self.theme.foreground),
+                            );
+
+                            ui.add_space(8.0);
+                            ui.separator();
+                            ui.add_space(4.0);
+
+                            // Status Summary
+                            ui.label(
+                                egui::RichText::new("Current Device Status:")
+                                    .strong()
+                                    .color(self.theme.accent),
+                            );
+
+                            egui::Grid::new("setup_status_grid")
+                                .spacing([10.0, 4.0])
+                                .show(ui, |ui| {
+                                    ui.label("Selected IP:");
+                                    ui.label(egui::RichText::new(&self.selected_device_ip).monospace());
+                                    ui.end_row();
+
+                                    ui.label("Connection:");
+                                    let (reach_label, reach_color) = if self.is_device_reachable {
+                                        ("Reachable / Online", egui::Color32::from_rgb(46, 204, 113))
+                                    } else {
+                                        ("Unreachable / Offline", egui::Color32::from_rgb(220, 60, 50))
+                                    };
+                                    ui.label(egui::RichText::new(reach_label).strong().color(reach_color));
+                                    ui.end_row();
+
+                                    ui.label("Mobile App Control:");
+                                    let mode_str = if self.device_details.ecp_setting_mode.is_empty() {
+                                        "Unknown"
+                                    } else {
+                                        &self.device_details.ecp_setting_mode
+                                    };
+                                    let mode_color = match mode_str.to_lowercase().as_str() {
+                                        "default" | "permissive" => egui::Color32::from_rgb(46, 204, 113),
+                                        "limited" | "disabled" => egui::Color32::from_rgb(240, 160, 40),
+                                        _ => self.theme.foreground,
+                                    };
+                                    ui.label(egui::RichText::new(mode_str).strong().color(mode_color));
+                                    ui.end_row();
+                                });
+                        });
+
+                    ui.add_space(8.0);
+                    ui.separator();
+
+                    ui.horizontal(|ui| {
+                        if ui.button("🔍 Scan Network").clicked() {
+                            self.is_scanning = true;
+                            self.status_text = "Scanning network...".into();
+                            self.start_discovery_scan();
+                        }
+                        if ui.button("🔄 Re-test Connection").clicked() {
+                            self.refresh_device_info();
+                        }
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Close").clicked() {
+                                self.show_setup_guide = false;
                             }
                         });
                     });
@@ -1087,6 +1301,9 @@ impl eframe::App for RokuRemoteApp {
                 );
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if self.is_scanning {
+                        ui.spinner();
+                    }
                     if ui.add(egui::Button::new("Scan")).clicked() {
                         self.is_scanning = true;
                         self.status_text = "Scanning network...".into();
@@ -1140,6 +1357,9 @@ impl eframe::App for RokuRemoteApp {
                     if response.clicked() {
                         self.toggle_power();
                     }
+                    if ui.add(egui::Button::new("⚙ Setup")).clicked() {
+                        self.show_setup_guide = !self.show_setup_guide;
+                    }
                     if ui.add(egui::Button::new("Device Info")).clicked() {
                         self.show_device_info = !self.show_device_info;
                     }
@@ -1149,19 +1369,76 @@ impl eframe::App for RokuRemoteApp {
             ui.add_space(2.0);
 
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Device IP:").color(self.theme.dark_foreground));
-                let text_edit = ui.add(
-                    egui::TextEdit::singleline(&mut self.selected_device_ip)
-                        .desired_width(120.0),
-                );
-                if text_edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    self.refresh_device_info();
-                }
-                if ui.button("Connect").clicked() {
-                    self.refresh_device_info();
+                ui.label(egui::RichText::new("Roku:").color(self.theme.dark_foreground));
+
+                if self.manual_ip_mode {
+                    let text_edit = ui.add(
+                        egui::TextEdit::singleline(&mut self.selected_device_ip)
+                            .desired_width(120.0)
+                            .hint_text("192.168.x.x"),
+                    );
+                    if text_edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        self.select_device(&self.selected_device_ip.clone());
+                    }
+                    if ui.button("Connect").clicked() {
+                        self.select_device(&self.selected_device_ip.clone());
+                    }
+                    if ui.button("📋 Discovered").clicked() {
+                        self.manual_ip_mode = false;
+                    }
+                } else {
+                    let current_label = if let Some(d) = self.devices.iter().find(|d| d.ip == self.selected_device_ip) {
+                        format!("📺 {} ({})", d.name, d.ip)
+                    } else if !self.selected_device_ip.is_empty() {
+                        format!("📺 Custom ({})", self.selected_device_ip)
+                    } else if self.is_scanning {
+                        "Searching for devices...".to_string()
+                    } else {
+                        "No Roku detected".to_string()
+                    };
+
+                    let mut newly_selected_ip = None;
+                    let mut switch_to_manual = false;
+
+                    egui::ComboBox::from_id_salt("roku_device_combo")
+                        .selected_text(current_label)
+                        .width(220.0)
+                        .show_ui(ui, |ui| {
+                            if self.devices.is_empty() {
+                                let empty_msg = if self.is_scanning {
+                                    "⏳ Scanning network..."
+                                } else {
+                                    "No Rokus found on network"
+                                };
+                                ui.label(egui::RichText::new(empty_msg).color(self.theme.dark_foreground));
+                            } else {
+                                for dev in &self.devices {
+                                    let is_current = dev.ip == self.selected_device_ip;
+                                    let item_label = format!("📺 {} ({})", dev.name, dev.ip);
+                                    if ui.selectable_label(is_current, item_label).clicked() {
+                                        newly_selected_ip = Some(dev.ip.clone());
+                                    }
+                                }
+                            }
+                            ui.separator();
+                            if ui.selectable_label(false, "✏ Enter IP manually...").clicked() {
+                                switch_to_manual = true;
+                            }
+                        });
+
+                    if let Some(ip) = newly_selected_ip {
+                        self.select_device(&ip);
+                    }
+                    if switch_to_manual {
+                        self.manual_ip_mode = true;
+                    }
+
+                    if ui.button("🔄").on_hover_text("Refresh connection & device status").clicked() {
+                        self.refresh_device_info();
+                    }
                 }
 
-                ui.add_space(10.0);
+                ui.add_space(8.0);
                 ui.label(egui::RichText::new("Current:").color(self.theme.dark_foreground));
                 ui.label(
                     egui::RichText::new(&self.active_app)
@@ -1199,6 +1476,38 @@ impl eframe::App for RokuRemoteApp {
                     );
                 });
             });
+
+            // Banner for Limited / Unreachable Mode
+            let is_limited = self.is_device_reachable
+                && (self.device_details.ecp_setting_mode.eq_ignore_ascii_case("limited")
+                    || self.device_details.ecp_setting_mode.eq_ignore_ascii_case("disabled"));
+
+            if is_limited {
+                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("⚠️ Roku Mobile App Control is 'Limited' (remote keypresses blocked).")
+                            .color(egui::Color32::from_rgb(240, 160, 40))
+                            .size(12.0)
+                            .strong(),
+                    );
+                    if ui.button(egui::RichText::new("⚙ Setup Instructions").color(egui::Color32::from_rgb(240, 160, 40))).clicked() {
+                        self.show_setup_guide = true;
+                    }
+                });
+            } else if !self.is_device_reachable && !self.is_scanning && !self.selected_device_ip.is_empty() {
+                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!("⚠️ Roku unreachable at {}. Verify network & power.", self.selected_device_ip))
+                            .color(egui::Color32::from_rgb(220, 80, 70))
+                            .size(12.0),
+                    );
+                    if ui.button("⚙ Setup Guide").clicked() {
+                        self.show_setup_guide = true;
+                    }
+                });
+            }
 
             ui.add_space(4.0);
             ui.separator();

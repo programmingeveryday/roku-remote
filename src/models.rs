@@ -27,6 +27,8 @@ pub struct DeviceDetails {
     pub network_name: String,
     pub power_mode: String,
     pub ui_resolution: String,
+    pub user_location: String,
+    pub ecp_setting_mode: String,
 }
 
 pub enum BackgroundMessage {

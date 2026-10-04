@@ -10,13 +10,49 @@ use crate::roku::parser::{
     parse_device_name_xml, parse_media_player_xml,
 };
 
+fn get_local_subnet_base() -> Option<(u8, u8, u8)> {
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    let ip = match socket.local_addr().ok()?.ip() {
+        std::net::IpAddr::V4(ipv4) => ipv4,
+        _ => return None,
+    };
+    let oct = ip.octets();
+    Some((oct[0], oct[1], oct[2]))
+}
+
+pub fn fetch_device_display_name(ip: &str) -> String {
+    let url = format!("http://{}:8060/query/device-info", ip);
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_millis(1200))
+        .build();
+    if let Ok(c) = client {
+        if let Ok(resp) = c.get(&url).send() {
+            if resp.status().is_success() {
+                if let Ok(text) = resp.text() {
+                    let base_name = parse_device_name_xml(&text)
+                        .map(|n| clean_html_entities(&n))
+                        .unwrap_or_else(|| "Roku Device".to_string());
+                    let details = parse_device_details_xml(&text);
+                    if !details.user_location.is_empty() && !base_name.contains(&details.user_location) {
+                        return format!("{} ({})", base_name, details.user_location);
+                    } else {
+                        return base_name;
+                    }
+                }
+            }
+        }
+    }
+    "Roku Device".to_string()
+}
+
 pub fn start_scan(tx: Sender<BackgroundMessage>, ctx: egui::Context) {
     thread::spawn(move || {
         let ssdp_msg = "M-SEARCH * HTTP/1.1\r\n\
-            HOST: 239.255.255.250:1900\r\n\
-            MAN: \"ssdp:discover\"\r\n\
-            MX: 2\r\n\
-            ST: roku:ecp\r\n\r\n";
+HOST: 239.255.255.250:1900\r\n\
+MAN: \"ssdp:discover\"\r\n\
+MX: 2\r\n\
+ST: roku:ecp\r\n\r\n";
 
         if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
             let _ = socket.set_read_timeout(Some(Duration::from_millis(1500)));
@@ -29,9 +65,10 @@ pub fn start_scan(tx: Sender<BackgroundMessage>, ctx: egui::Context) {
                     let text = String::from_utf8_lossy(&buf[..len]);
                     if text.to_lowercase().contains("roku") {
                         let ip = addr.ip().to_string();
+                        let name = fetch_device_display_name(&ip);
                         let _ = tx.send(BackgroundMessage::DeviceDiscovered(RokuDevice {
                             ip,
-                            name: "Roku Device".to_string(),
+                            name,
                         }));
                         ctx.request_repaint();
                     }
@@ -39,18 +76,35 @@ pub fn start_scan(tx: Sender<BackgroundMessage>, ctx: egui::Context) {
             }
         }
 
-        let probe_ips = vec!["192.168.0.108".to_string()];
-        for ip in probe_ips {
-            let target: Result<SocketAddr, _> = format!("{}:8060", ip).parse();
-            if let Ok(addr) = target {
-                if TcpStream::connect_timeout(&addr, Duration::from_millis(400)).is_ok() {
-                    let _ = tx.send(BackgroundMessage::DeviceDiscovered(RokuDevice {
-                        ip,
-                        name: "Roku Streaming Stick Plus".to_string(),
-                    }));
-                    ctx.request_repaint();
+        // Fast multi-threaded subnet scan to discover Rokus even when multicast/SSDP is dropped by the router
+        if let Some((o1, o2, o3)) = get_local_subnet_base() {
+            let chunks: Vec<Vec<u8>> = (1..=254)
+                .collect::<Vec<u8>>()
+                .chunks(8)
+                .map(|c| c.to_vec())
+                .collect();
+
+            thread::scope(|s| {
+                for chunk in chunks {
+                    let tx_ref = &tx;
+                    let ctx_ref = &ctx;
+                    s.spawn(move || {
+                        for i in chunk {
+                            let ip = format!("{}.{}.{}.{}", o1, o2, o3, i);
+                            if let Ok(addr) = format!("{}:8060", ip).parse::<SocketAddr>() {
+                                if TcpStream::connect_timeout(&addr, Duration::from_millis(220)).is_ok() {
+                                    let name = fetch_device_display_name(&ip);
+                                    let _ = tx_ref.send(BackgroundMessage::DeviceDiscovered(RokuDevice {
+                                        ip,
+                                        name,
+                                    }));
+                                    ctx_ref.request_repaint();
+                                }
+                            }
+                        }
+                    });
                 }
-            }
+            });
         }
 
         let _ = tx.send(BackgroundMessage::ScanFinished);
@@ -265,6 +319,21 @@ pub fn refresh_apps_worker(ip: &str, tx: &Sender<BackgroundMessage>, ctx: &egui:
     if !sent {
         let _ = tx.send(BackgroundMessage::AppsRefreshFailed);
         ctx.request_repaint();
+    }
+}
+
+pub fn load_cached_last_ip() -> Option<String> {
+    let cache_file = get_icon_cache_dir().join("last_ip.txt");
+    std::fs::read_to_string(cache_file)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+pub fn save_cached_last_ip(ip: &str) {
+    if !ip.is_empty() {
+        let cache_file = get_icon_cache_dir().join("last_ip.txt");
+        let _ = std::fs::write(cache_file, ip);
     }
 }
 

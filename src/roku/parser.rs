@@ -58,6 +58,8 @@ pub fn parse_device_details_xml(xml: &str) -> DeviceDetails {
         network_name: extract("network-name"),
         power_mode: extract("power-mode"),
         ui_resolution: extract("ui-resolution"),
+        user_location: extract("user-device-location"),
+        ecp_setting_mode: extract("ecp-setting-mode"),
     }
 }
 
@@ -183,7 +185,7 @@ mod tests {
 
     #[test]
     fn test_parse_device_details_xml() {
-        let sample = "<device-info><model-name>Roku Stick</model-name><model-number>3830R</model-number><software-version>15.3.4</software-version><network-name>HomeWi-Fi</network-name><power-mode>PowerOn</power-mode><ui-resolution>1080p</ui-resolution></device-info>";
+        let sample = "<device-info><model-name>Roku Stick</model-name><model-number>3830R</model-number><software-version>15.3.4</software-version><network-name>HomeWi-Fi</network-name><power-mode>PowerOn</power-mode><ui-resolution>1080p</ui-resolution><user-device-location>Living room</user-device-location><ecp-setting-mode>limited</ecp-setting-mode></device-info>";
         let details = parse_device_details_xml(sample);
         assert_eq!(details.model_name, "Roku Stick");
         assert_eq!(details.model_number, "3830R");
@@ -191,5 +193,7 @@ mod tests {
         assert_eq!(details.network_name, "HomeWi-Fi");
         assert_eq!(details.power_mode, "PowerOn");
         assert_eq!(details.ui_resolution, "1080p");
+        assert_eq!(details.user_location, "Living room");
+        assert_eq!(details.ecp_setting_mode, "limited");
     }
 }
