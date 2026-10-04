@@ -1138,11 +1138,11 @@ impl eframe::App for RokuRemoteApp {
                                         .spacing([8.0, 4.0])
                                         .show(ui, |ui| {
                                             ui.label(egui::RichText::new("Step 1:").strong().color(self.theme.accent));
-                                            ui.label("Using your physical Roku TV remote, press Home (🏠).");
+                                            ui.label("Using your physical Roku remote, press the Home button.");
                                             ui.end_row();
 
                                             ui.label(egui::RichText::new("Step 2:").strong().color(self.theme.accent));
-                                            ui.label("Navigate to Settings (⚙) → System.");
+                                            ui.label("Navigate to Settings > System.");
                                             ui.end_row();
 
                                             ui.label(egui::RichText::new("Step 3:").strong().color(self.theme.accent));
@@ -1150,7 +1150,7 @@ impl eframe::App for RokuRemoteApp {
                                             ui.end_row();
 
                                             ui.label(egui::RichText::new("Step 4:").strong().color(self.theme.accent));
-                                            ui.label("Select Control by mobile apps → Network access.");
+                                            ui.label("Select Control by mobile apps > Network access.");
                                             ui.end_row();
 
                                             ui.label(egui::RichText::new("Step 5:").strong().color(self.theme.accent));
@@ -1184,7 +1184,7 @@ impl eframe::App for RokuRemoteApp {
                                     .color(self.theme.accent),
                             );
                             ui.label(
-                                egui::RichText::new("If your router blocks discovery broadcasts:\n• On Roku: Settings → Network → About → IP address.\n• In this app: Select '✏ Enter IP manually' in the device selector dropdown.")
+                                egui::RichText::new("If your router blocks discovery broadcasts:\n• On Roku: Settings > Network > About > IP address.\n• In this app: Select 'Enter IP manually' in the device selector dropdown.")
                                     .size(11.5)
                                     .color(self.theme.foreground),
                             );
@@ -1383,7 +1383,7 @@ impl eframe::App for RokuRemoteApp {
                     if ui.button("Connect").clicked() {
                         self.select_device(&self.selected_device_ip.clone());
                     }
-                    if ui.button("📋 Discovered").clicked() {
+                    if ui.button("Discovered List").clicked() {
                         self.manual_ip_mode = false;
                     }
                 } else {
@@ -1421,7 +1421,7 @@ impl eframe::App for RokuRemoteApp {
                                 }
                             }
                             ui.separator();
-                            if ui.selectable_label(false, "✏ Enter IP manually...").clicked() {
+                            if ui.selectable_label(false, "+ Enter IP manually...").clicked() {
                                 switch_to_manual = true;
                             }
                         });
