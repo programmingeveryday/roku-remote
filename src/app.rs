@@ -335,9 +335,58 @@ impl RokuRemoteApp {
 
             ui.add_space(6.0);
 
+            let draw_arrow_button = |ui: &mut egui::Ui, size: egui::Vec2, direction: &'static str| -> bool {
+                let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+                let visuals = ui.style().interact(&response);
+
+                ui.painter().rect(
+                    rect,
+                    visuals.rounding,
+                    visuals.bg_fill,
+                    visuals.bg_stroke,
+                );
+
+                let center = rect.center();
+                let arrow_r = 7.0f32; // Half-size of arrow glyph
+                let fg = visuals.text_color();
+
+                let points = match direction {
+                    "up" => vec![
+                        center + egui::vec2(0.0, -arrow_r),
+                        center + egui::vec2(-arrow_r * 1.15, arrow_r * 0.85),
+                        center + egui::vec2(arrow_r * 1.15, arrow_r * 0.85),
+                    ],
+                    "down" => vec![
+                        center + egui::vec2(0.0, arrow_r),
+                        center + egui::vec2(-arrow_r * 1.15, -arrow_r * 0.85),
+                        center + egui::vec2(arrow_r * 1.15, -arrow_r * 0.85),
+                    ],
+                    "left" => vec![
+                        center + egui::vec2(-arrow_r, 0.0),
+                        center + egui::vec2(arrow_r * 0.85, -arrow_r * 1.15),
+                        center + egui::vec2(arrow_r * 0.85, arrow_r * 1.15),
+                    ],
+                    "right" => vec![
+                        center + egui::vec2(arrow_r, 0.0),
+                        center + egui::vec2(-arrow_r * 0.85, -arrow_r * 1.15),
+                        center + egui::vec2(-arrow_r * 0.85, arrow_r * 1.15),
+                    ],
+                    _ => vec![],
+                };
+
+                if !points.is_empty() {
+                    ui.painter().add(egui::Shape::convex_polygon(
+                        points,
+                        fg,
+                        egui::Stroke::NONE,
+                    ));
+                }
+
+                response.clicked()
+            };
+
             // Row 2: UP
-            let up_btn = egui::Button::new(egui::RichText::new("▲").size(15.0));
-            if ui.add_sized(btn_dir, up_btn).clicked() {
+            if draw_arrow_button(ui, btn_dir, "up") {
                 self.send_key("Up");
             }
 
@@ -349,8 +398,7 @@ impl RokuRemoteApp {
                 let pad = ((width - row_w) / 2.0).max(0.0);
                 ui.add_space(pad);
 
-                let left_btn = egui::Button::new(egui::RichText::new("◀").size(15.0));
-                if ui.add_sized(btn_dir, left_btn).clicked() {
+                if draw_arrow_button(ui, btn_dir, "left") {
                     self.send_key("Left");
                 }
 
@@ -365,8 +413,7 @@ impl RokuRemoteApp {
                     self.send_key("Select");
                 }
 
-                let right_btn = egui::Button::new(egui::RichText::new("▶").size(15.0));
-                if ui.add_sized(btn_dir, right_btn).clicked() {
+                if draw_arrow_button(ui, btn_dir, "right") {
                     self.send_key("Right");
                 }
             });
@@ -374,8 +421,7 @@ impl RokuRemoteApp {
             ui.add_space(6.0);
 
             // Row 4: DOWN
-            let down_btn = egui::Button::new(egui::RichText::new("▼").size(15.0));
-            if ui.add_sized(btn_dir, down_btn).clicked() {
+            if draw_arrow_button(ui, btn_dir, "down") {
                 self.send_key("Down");
             }
 
