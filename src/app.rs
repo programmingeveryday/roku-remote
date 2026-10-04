@@ -989,11 +989,42 @@ impl eframe::App for RokuRemoteApp {
 
                             let is_active = self.is_active.load(Ordering::Relaxed);
                             ui.label(egui::RichText::new("App Status:").strong().color(self.theme.accent));
-                            if is_active {
-                                ui.label(egui::RichText::new("● Live (Active)").color(egui::Color32::from_rgb(50, 185, 90)).strong());
-                            } else {
-                                ui.label(egui::RichText::new("💤 Sleeping (Idle)").color(egui::Color32::from_rgb(150, 160, 180)).strong());
-                            }
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 6.0;
+                                let (icon_rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+                                let center = icon_rect.center();
+                                if is_active {
+                                    // Glowing live dot
+                                    ui.painter().circle_filled(center, 4.0, egui::Color32::from_rgb(46, 204, 113));
+                                    ui.painter().circle_stroke(
+                                        center,
+                                        6.0,
+                                        egui::Stroke::new(1.2f32, egui::Color32::from_rgba_premultiplied(46, 204, 113, 100)),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new("Live (Active)")
+                                            .color(egui::Color32::from_rgb(46, 204, 113))
+                                            .strong(),
+                                    );
+                                } else {
+                                    // Sleeping/idle indicator ring with inner dot
+                                    ui.painter().circle_stroke(
+                                        center,
+                                        4.5,
+                                        egui::Stroke::new(1.5f32, egui::Color32::from_rgb(155, 168, 190)),
+                                    );
+                                    ui.painter().circle_filled(
+                                        center,
+                                        1.8,
+                                        egui::Color32::from_rgb(155, 168, 190),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new("Sleeping (Idle)")
+                                            .color(egui::Color32::from_rgb(155, 168, 190))
+                                            .strong(),
+                                    );
+                                }
+                            });
                             ui.end_row();
                         });
 
