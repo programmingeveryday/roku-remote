@@ -103,7 +103,36 @@ pub fn update_media_player_worker(ip: &str, tx: &Sender<BackgroundMessage>, ctx:
     }
 }
 
+pub fn get_icon_cache_dir() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let cache_dir = std::path::PathBuf::from(home).join(".cache/roku-remote-rs/icons");
+    let _ = std::fs::create_dir_all(&cache_dir);
+    cache_dir
+}
+
 pub fn load_app_icon_worker(ip: &str, app_id: &str, tx: &Sender<BackgroundMessage>, ctx: &egui::Context) {
+    let cache_file = get_icon_cache_dir().join(format!("{}.img", app_id));
+
+    // 1. Try loading cached icon from disk first
+    if let Ok(bytes) = std::fs::read(&cache_file) {
+        if let Ok(img) = image::load_from_memory(&bytes) {
+            let rgba = img.to_rgba8();
+            let size = [rgba.width() as usize, rgba.height() as usize];
+            let pixels = rgba.into_raw();
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
+            let _ = tx.send(BackgroundMessage::AppIconLoaded {
+                id: app_id.to_string(),
+                image: color_image,
+            });
+            ctx.request_repaint();
+            return;
+        }
+    }
+
+    // 2. If not cached or if reading failed, fetch from device
+    if ip.is_empty() {
+        return;
+    }
     let url = format!("http://{}:8060/query/icon/{}", ip, app_id);
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_millis(1500))
@@ -112,6 +141,9 @@ pub fn load_app_icon_worker(ip: &str, app_id: &str, tx: &Sender<BackgroundMessag
         if let Ok(resp) = c.get(&url).send() {
             if resp.status().is_success() {
                 if let Ok(bytes) = resp.bytes() {
+                    // Persist to disk cache
+                    let _ = std::fs::write(&cache_file, &bytes);
+
                     if let Ok(img) = image::load_from_memory(&bytes) {
                         let rgba = img.to_rgba8();
                         let size = [rgba.width() as usize, rgba.height() as usize];
@@ -147,6 +179,51 @@ pub fn update_active_app_worker(ip: &str, tx: &Sender<BackgroundMessage>, ctx: &
     }
 }
 
+pub fn save_cached_apps(apps: &[crate::models::AppItem]) {
+    let cache_file = get_icon_cache_dir().join("apps_cache.json");
+    let mut json = String::from("[\n");
+    for (i, app) in apps.iter().enumerate() {
+        let name_escaped = app.name.replace('\\', "\\\\").replace('"', "\\\"");
+        let id_escaped = app.id.replace('\\', "\\\\").replace('"', "\\\"");
+        json.push_str(&format!(
+            "  {{\"id\": \"{}\", \"name\": \"{}\"}}{}",
+            id_escaped,
+            name_escaped,
+            if i + 1 < apps.len() { ",\n" } else { "\n" }
+        ));
+    }
+    json.push(']');
+    let _ = std::fs::write(cache_file, json);
+}
+
+pub fn load_cached_apps() -> Option<Vec<crate::models::AppItem>> {
+    let cache_file = get_icon_cache_dir().join("apps_cache.json");
+    let content = std::fs::read_to_string(cache_file).ok()?;
+    let mut items = Vec::new();
+    let mut rest = content.as_str();
+    while let Some(start) = rest.find("{\"id\": \"") {
+        let after_id = &rest[start + 8..];
+        if let Some(id_end) = after_id.find('"') {
+            let id = after_id[..id_end].to_string();
+            if let Some(name_start) = after_id[id_end..].find("\"name\": \"") {
+                let after_name = &after_id[id_end + name_start + 9..];
+                if let Some(name_end) = after_name.find('"') {
+                    let name = after_name[..name_end].to_string();
+                    items.push(crate::models::AppItem { id, name });
+                    rest = &after_name[name_end + 1..];
+                    continue;
+                }
+            }
+        }
+        break;
+    }
+    if !items.is_empty() {
+        Some(items)
+    } else {
+        None
+    }
+}
+
 pub fn update_apps_worker(ip: &str, tx: &Sender<BackgroundMessage>, ctx: &egui::Context) {
     let url = format!("http://{}:8060/query/apps", ip);
     let client = reqwest::blocking::Client::builder()
@@ -157,6 +234,7 @@ pub fn update_apps_worker(ip: &str, tx: &Sender<BackgroundMessage>, ctx: &egui::
             if let Ok(text) = resp.text() {
                 let parsed = parse_apps_xml(&text);
                 if !parsed.is_empty() {
+                    save_cached_apps(&parsed);
                     let _ = tx.send(BackgroundMessage::AppsListUpdated(parsed));
                     ctx.request_repaint();
                 }
@@ -176,6 +254,7 @@ pub fn refresh_apps_worker(ip: &str, tx: &Sender<BackgroundMessage>, ctx: &egui:
             if let Ok(text) = resp.text() {
                 let parsed = parse_apps_xml(&text);
                 if !parsed.is_empty() {
+                    save_cached_apps(&parsed);
                     let _ = tx.send(BackgroundMessage::AppsListRefreshed(parsed));
                     ctx.request_repaint();
                     sent = true;
@@ -188,4 +267,5 @@ pub fn refresh_apps_worker(ip: &str, tx: &Sender<BackgroundMessage>, ctx: &egui:
         ctx.request_repaint();
     }
 }
+
 

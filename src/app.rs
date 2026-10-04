@@ -53,6 +53,9 @@ impl RokuRemoteApp {
         let shared_ip = Arc::new(Mutex::new("192.168.0.108".to_string()));
         Self::start_playback_watcher(shared_ip.clone(), tx.clone(), cc.egui_ctx.clone());
 
+        let initial_apps = crate::roku::client::load_cached_apps()
+            .unwrap_or_else(default_popular_apps);
+
         let app = Self {
             devices: Vec::new(),
             selected_device_ip: "192.168.0.108".to_string(),
@@ -63,7 +66,7 @@ impl RokuRemoteApp {
             device_details: DeviceDetails::default(),
             is_device_reachable: true,
             show_device_info: false,
-            apps: default_popular_apps(),
+            apps: initial_apps.clone(),
             app_textures: HashMap::new(),
             pending_icons: Vec::new(),
             is_scanning: false,
@@ -75,6 +78,9 @@ impl RokuRemoteApp {
             rx,
             tx,
         };
+
+        // Immediately load any cached icons for the apps list so they are ready on launch
+        app.fetch_app_icons(&initial_apps);
 
         app.start_discovery_scan();
         app.refresh_device_info();
