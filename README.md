@@ -1,6 +1,6 @@
 # 📺 Roku Remote (Rust)
 
-A fast, lightweight, and cross-platform native desktop remote control for Roku streaming sticks and Smart TVs. Written in **Rust** using **egui / eframe**.
+A modern, fast, lightweight, and cross-platform native desktop remote control for Roku streaming sticks and Smart TVs. Written in **Rust** using **egui / eframe**.
 
 ![Roku Remote Screenshot](docs/images/screenshot.png)
 
@@ -8,12 +8,51 @@ A fast, lightweight, and cross-platform native desktop remote control for Roku s
 
 ## ✨ Features
 
-- **Automatic Device Discovery**: Uses UPnP / SSDP UDP multicast (`M-SEARCH roku:ecp`) and network probes to automatically locate Roku devices on your local Wi-Fi / LAN.
+- **Automatic Device Discovery**: Uses UPnP / SSDP UDP multicast (`M-SEARCH roku:ecp`) and automatic TCP network probes to locate Roku devices on your local Wi-Fi / LAN.
 - **Full Navigation D-Pad**: `Up`, `Down`, `Left`, `Right`, `OK / Select`, `Home`, `Back`, `Instant Replay`, and `Options / Info (*)`.
 - **Media & Volume Control**: `Play / Pause`, `Fast Forward`, `Rewind`, `Volume Up`, `Volume Down`, and `Mute`.
-- **App Launcher**: Instant one-click launch for popular channels and apps (YouTube, Netflix, Disney+, Prime Video, Hulu, Max, Spotify, Apple TV, Plex, etc.).
-- **Live Active App Detection**: Automatically queries and displays which app is currently open on your TV.
-- **Cross-Platform**: Compiles into a single standalone binary for **Linux (Wayland & X11)**, **macOS**, and **Windows**.
+- **Live Playback State & Dynamic Play/Pause Button**: Real-time status indicator (`▶ Playing`, `⏸ Paused`, `⏳ Buffering`) paired with a context-aware Play/Pause button that dynamically changes label and color (green for playing, amber for paused).
+- **Power State Indicator & Instant Power Toggle**:
+  - Live status indicator (green `●` for On, red `●` for Off).
+  - Optimistic, responsive power toggle button with multi-stage verification against Roku's `/query/device-info` endpoint.
+- **Quick Launch Apps with High-Res Channel Icons**:
+  - Automatically queries all installed channels on the Roku device.
+  - Full-bleed app cards displaying high-res icons (supports both PNG and JPEG formats, including Netflix, Prime Video, YouTube, Disney+, Hulu, HBO Max, etc.).
+  - Seamless fallback to channel names if an icon is not available.
+- **Offline & Instant Startup Icon Caching**:
+  - Channel list and decoded icons are cached locally (`~/.cache/roku-remote-rs/icons/`), enabling instant rendering on startup without waiting for network queries.
+  - Dedicated **`🔄 Refresh Apps`** button (and shortcut) to rescan and update installed channels anytime.
+- **Adaptive Responsive Layout**:
+  - **Wide screens (>=680px)**: Side-by-side view with remote controls on the left and full apps grid on the right.
+  - **Compact screens**: Vertically scrolling layout optimized for narrow windows.
+- **Full Keyboard Control & Shortcut Cheat Sheet**:
+  - Direct keyboard control for navigation, volume, playback, and app refresh.
+  - Built-in shortcuts cheat sheet modal (`Ctrl + ,` or `Esc` to close).
+- **Omarchy / System Desktop Theme Integration**:
+  - Automatically detects and matches Omarchy system themes (`colors.toml`) with live hot-reloading.
+- **Device Details Modal**:
+  - Inspect model name, model number, software version, Wi-Fi network, UI resolution, power mode, and IP address.
+- **Modular & Idiomatic Rust Architecture**:
+  - Refactored into clean modules (`app`, `models`, `roku::client`, `roku::parser`, `theme`) with 100% unit test coverage for XML parsers and color utilities.
+
+---
+
+## ⌨️ Keyboard Shortcuts
+
+| Shortcut | Action | Description |
+| :--- | :--- | :--- |
+| **Arrow Keys** | Navigation | Move Up, Down, Left, Right |
+| **Enter** / **Space** | OK / Select | Activate selected item |
+| **Backspace** / **Esc** | Back | Back / Return button |
+| **H** | Home | Return to Roku Home screen |
+| **P** | Play / Pause | Toggle media playback |
+| **R** | Replay | Instant replay (jumps back ~10s) |
+| **I** | Info / Options | Options / Asterisk (`*`) menu |
+| **Ctrl + Up / Down** | Volume | Volume Up / Volume Down |
+| **Ctrl + Left / Right** | Seek | Fast Forward (`>>`) / Rewind (`<<`) |
+| **Ctrl + M** | Mute | Toggle audio mute |
+| **Ctrl + Shift + R** or **Ctrl + A** | Refresh Apps | Check and reload installed apps & icons |
+| **Ctrl + ,** | Cheat Sheet | Toggle keyboard shortcuts modal |
 
 ---
 
@@ -79,21 +118,23 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1
 
 ---
 
-## 🔨 Manual Building & Running
+## 🔨 Manual Building & Testing
 
-### 1. Run in Development Mode
+### 1. Run Tests
+```bash
+cargo test
+```
+
+### 2. Run in Development Mode
 ```bash
 cargo run
 ```
 
-### 2. Build Release Binary
+### 3. Build Release Binary
 ```bash
 cargo build --release
 ```
-The optimized executable will be located at:
-```bash
-target/release/roku-remote-rs
-```
+The optimized executable will be located at `target/release/roku-remote-rs`.
 
 ---
 
