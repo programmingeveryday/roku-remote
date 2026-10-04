@@ -947,6 +947,15 @@ impl eframe::App for RokuRemoteApp {
                             row("Display Resolution:", &self.device_details.ui_resolution);
                             row("Power Mode:", &self.device_details.power_mode);
                             row("IP Address:", &self.selected_device_ip);
+
+                            let is_active = self.is_active.load(Ordering::Relaxed);
+                            ui.label(egui::RichText::new("App Status:").strong().color(self.theme.accent));
+                            if is_active {
+                                ui.label(egui::RichText::new("● Live (Active)").color(egui::Color32::from_rgb(50, 185, 90)).strong());
+                            } else {
+                                ui.label(egui::RichText::new("💤 Sleeping (Idle)").color(egui::Color32::from_rgb(150, 160, 180)).strong());
+                            }
+                            ui.end_row();
                         });
 
                     ui.add_space(8.0);
@@ -1087,41 +1096,6 @@ impl eframe::App for RokuRemoteApp {
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let is_sleeping = !self.is_active.load(Ordering::Relaxed);
-                    let badge_btn = if is_sleeping {
-                        egui::Button::new(
-                            egui::RichText::new("💤 Sleeping")
-                                .size(11.0)
-                                .color(egui::Color32::from_rgb(175, 185, 205)),
-                        )
-                        .fill(egui::Color32::from_rgb(45, 52, 68))
-                    } else {
-                        egui::Button::new(
-                            egui::RichText::new("● Live")
-                                .size(11.0)
-                                .color(egui::Color32::from_rgb(75, 210, 115)),
-                        )
-                        .fill(egui::Color32::from_rgb(30, 52, 40))
-                    };
-
-                    let badge_tooltip = if is_sleeping {
-                        "Sleeping: background queries paused.\nClick to wake up immediately."
-                    } else {
-                        "Live: auto-refreshing.\nClick to sleep immediately."
-                    };
-
-                    if ui.add(badge_btn).on_hover_text(badge_tooltip).clicked() {
-                        if is_sleeping {
-                            self.is_active.store(true, Ordering::Relaxed);
-                            self.last_active = Instant::now();
-                            self.refresh_device_info();
-                        } else {
-                            self.is_active.store(false, Ordering::Relaxed);
-                            self.last_active = Instant::now() - Duration::from_secs(60);
-                        }
-                    }
-
-                    ui.add_space(8.0);
                     ui.label(
                         egui::RichText::new(&self.status_text)
                             .color(self.theme.dark_foreground)
