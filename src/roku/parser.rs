@@ -60,6 +60,7 @@ pub fn parse_device_details_xml(xml: &str) -> DeviceDetails {
         ui_resolution: extract("ui-resolution"),
         user_location: extract("user-device-location"),
         ecp_setting_mode: extract("ecp-setting-mode"),
+        is_tv: extract("is-tv").eq_ignore_ascii_case("true"),
     }
 }
 
@@ -195,5 +196,6 @@ mod tests {
         assert_eq!(details.ui_resolution, "1080p");
         assert_eq!(details.user_location, "Living room");
         assert_eq!(details.ecp_setting_mode, "limited");
+        assert_eq!(details.is_tv, false);
     }
 }

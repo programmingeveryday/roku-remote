@@ -29,6 +29,7 @@ pub struct DeviceDetails {
     pub ui_resolution: String,
     pub user_location: String,
     pub ecp_setting_mode: String,
+    pub is_tv: bool,
 }
 
 pub enum BackgroundMessage {
