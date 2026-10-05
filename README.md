@@ -9,25 +9,28 @@ A modern, fast, lightweight, and cross-platform native desktop remote control fo
 ## ✨ Features
 
 - **Multi-Device Discovery & Selector**: Automatically discovers all Roku devices on your local Wi-Fi / LAN via SSDP UDP multicast and parallel multi-threaded subnet probes. Includes an interactive dropdown selector to switch between multiple Rokus across different rooms, as well as a manual IP entry mode.
-- **In-App Setup Guide & Permission Alerts**: Built-in interactive setup guide modal (`⚙ Setup`) and automatic warning banners if a Roku's Mobile App Control is in "Limited" mode, providing step-by-step instructions to enable network control.
+- **One-Click Refresh with Live Spinner Feedback**: Dedicated **`🔄`** refresh button right beside the device selector that triggers network discovery, polls media playback state, queries active applications, and refreshes installed channel inventory with animated spinner feedback.
+- **In-App Setup Guide & Permission Alerts**: Built-in interactive setup guide modal (`⚙ Setup`) with guidance for HDMI-CEC setup and automatic warning banners if a Roku's Mobile App Control is in "Limited" mode.
+- **Smart Power Control & HDMI-CEC 1-Touch Play**:
+  - Unified single-button power toggle (`Power Off` in red / `Power On` in green) reflecting TV and display status.
+  - Automatically sends HDMI-CEC 1-Touch Play sequences (`Home` + `Power`) on power up so Roku Streaming Sticks wake connected televisions and switch to the correct HDMI input seamlessly.
+  - Independently monitors device connectivity (`Online` status in Device Details).
 - **Full Navigation D-Pad**: Vector-rendered arrow keys (`▲`, `▼`, `◄`, `►`), `OK / Select`, `Home`, `Back`, `Instant Replay`, and `Options / Info (*)`.
 - **Media & Volume Control**: Dedicated playback row (`<<`, `Play / Pause`, `>>`), `Volume Up`, `Volume Down`, and `Mute`.
 - **Live Playback State & Dynamic Play/Pause Button**: Real-time status indicator (`▶ Playing`, `⏸ Paused`, `⏳ Buffering`) paired with a context-aware Play/Pause button that dynamically changes label and color (green for playing, amber for paused).
-- **Power State Indicator & Instant Power Toggle**:
-  - Live status indicator with crisp vector computer power symbol (green for On, red for Off).
-  - High-visibility action button (`Power Off` in red / `Power On` in green) with vector power icon and multi-stage verification against Roku's `/query/device-info` endpoint.
 - **True Sleep State & Zero Idle Overhead**:
   - Automatically enters deep sleep mode when minimized (instant), unfocused (3s), or idle (10s), stopping all background network queries and file polling (0% CPU, 0 network requests).
   - Wakes up instantly on user interaction and updates status.
 - **Quick Launch Apps with High-Res Channel Icons**:
-  - Automatically queries all installed channels on the Roku device.
+  - Automatically queries and displays all installed channels on the active Roku device.
+  - Automatically rescans apps whenever a new device is selected or on first connection (cleanly clearing stale channel cards if none are found).
   - Full-bleed app cards displaying high-res icons (supports both PNG and JPEG formats, including Netflix, Prime Video, YouTube, Disney+, Hulu, HBO Max, etc.).
   - Seamless fallback to channel names if an icon is not available.
 - **Offline & Instant Startup Icon Caching**:
   - Channel list and decoded icons are cached locally (`~/.cache/roku-remote-rs/icons/`), enabling instant rendering on startup without waiting for network queries.
   - Dedicated **`🔄 Refresh Apps`** button (and shortcut) to rescan and update installed channels anytime.
 - **Adaptive Responsive Layout**:
-  - Automatically transitions between a two-column wide view and a compact single-column view based on window width.
+  - Dynamically detects window dimensions and reflows into wide (two-column) or narrow (single-column) views with zero text collisions or button crowding.
 - **Full Keyboard Control & Shortcut Cheat Sheet**:
   - Direct keyboard control for navigation, volume, playback, and app refresh.
   - Built-in shortcuts cheat sheet modal (`Ctrl + ,` or `Esc` to close).
@@ -47,7 +50,11 @@ Roku Remote dynamically detects window width and automatically reflows its user 
 * **Wide Screen Mode (window width ≥ 680px)**: 
   Splits into two side-by-side columns. Remote navigation and media playback controls remain pinned on the left (`300px`), while the full grid of quick-launch channel cards expands across the right side.
 * **Compact / Narrow Window Mode (window width < 680px)**: 
-  Automatically transitions into a single-column, vertically scrollable layout. This mode is designed for tiling window managers (such as Hyprland, Sway, or i3), side panels, or snapping the remote beside another active window.
+  Automatically transitions into an uncrowded single-column layout:
+  - **Header Bar**: App brand and status indicator on the left; clean action buttons (`Device Info`, `Setup`, `Power Toggle`) on the right.
+  - **Row 2A**: Full-width device dropdown selector and instant network refresh button (`[ 🔄 ]`).
+  - **Row 2B**: Real-time media playback state on the left and discovery / scan status on the right, completely eliminating text crowding.
+  - **Control & App Stack**: Ergonomic remote control pad followed by vertically scrollable quick-launch channel cards. Ideal for tiling window managers (Hyprland, Sway, i3) or sidebars.
 
 <p align="center">
   <img src="docs/images/screenshot-narrow.png" width="460" alt="Roku Remote Compact View" />
@@ -87,6 +94,13 @@ For this remote control (or any external app) to communicate with your Roku devi
 5. Ensure your computer and your Roku device are connected to the **same local Wi-Fi / LAN network**.
 
 > **Note:** Roku devices communicate via HTTP and SSDP over port `8060`. If the network access setting is Disabled, the Roku will block button presses and app launch requests.
+
+### 📺 TV Power Control via Roku (HDMI-CEC 1-Touch Play)
+
+If using a **Roku Streaming Stick** plugged into an external TV:
+1. **On your Roku**: Navigate to **Settings** → **System** → **Control other devices (CEC)** → Check **1-touch play**.
+2. **On your TV**: Ensure HDMI-CEC is enabled in your TV's settings menu (often named *Anynet+* on Samsung, *Bravia Sync* on Sony, *SimpLink* on LG, or *CEC*).
+3. When you click **`Power On`**, Roku Remote issues an HDMI-CEC 1-Touch Play wake command (`Home` + `Power`), turning on the television screen and automatically switching to the Roku's HDMI input.
 
 ---
 
