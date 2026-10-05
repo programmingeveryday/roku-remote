@@ -10,7 +10,7 @@ use crate::models::{
 };
 use crate::roku::client::{
     load_app_icon_worker, refresh_apps_worker, start_scan, update_active_app_worker,
-    update_apps_worker, update_device_name_worker, update_media_player_worker,
+    update_device_name_worker, update_media_player_worker,
 };
 use crate::theme::{apply_theme, load_omarchy_theme, start_theme_watcher, ThemeColors};
 
@@ -299,6 +299,22 @@ impl RokuRemoteApp {
         });
     }
 
+    pub fn refresh_all(&mut self) {
+        self.is_scanning = true;
+        self.is_refreshing_apps = true;
+        self.status_text = "Refreshing device & scanning network...".into();
+        self.start_discovery_scan();
+        self.refresh_device_info();
+        if !self.selected_device_ip.is_empty() {
+            let ip = self.selected_device_ip.clone();
+            let tx = self.tx.clone();
+            let ctx = self.ctx.clone();
+            thread::spawn(move || {
+                refresh_apps_worker(&ip, &tx, &ctx);
+            });
+        }
+    }
+
     pub fn refresh_device_info(&self) {
         if self.selected_device_ip.is_empty() {
             return;
@@ -313,7 +329,7 @@ impl RokuRemoteApp {
             update_device_name_worker(&ip, &tx, &ctx);
             update_active_app_worker(&ip, &tx, &ctx);
             update_media_player_worker(&ip, &tx, &ctx);
-            update_apps_worker(&ip, &tx, &ctx);
+            refresh_apps_worker(&ip, &tx, &ctx);
         });
     }
 
@@ -1474,237 +1490,371 @@ impl eframe::App for RokuRemoteApp {
             let total_width = ui.available_width();
             let is_wide = total_width >= 680.0;
 
-            // Global Header
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("📺 Roku Remote")
-                        .strong()
-                        .size(17.0)
-                        .color(self.theme.foreground),
-                );
+            let is_powered_on = if !self.is_device_reachable {
+                false
+            } else if self.device_details.is_tv {
+                match self.device_details.power_mode.as_str() {
+                    "PowerOn" => true,
+                    "DisplayOff" | "Headless" => true,
+                    "PowerOff" | "Standby" => false,
+                    _ => self.is_device_reachable,
+                }
+            } else {
+                // For streaming sticks / players: if the television is off, consider Roku as being off
+                self.tv_powered_on.load(Ordering::Relaxed)
+            };
 
-                // Display Roku custom friendly name
-                ui.label(
-                    egui::RichText::new(format!("• {}", self.device_name))
-                        .size(13.0)
-                        .color(self.theme.dark_foreground),
-                );
+            let (power_icon_color, power_status_label) = if !self.is_device_reachable {
+                (egui::Color32::from_rgb(220, 60, 50), "Offline")
+            } else if is_powered_on {
+                (egui::Color32::from_rgb(46, 204, 113), "On")
+            } else {
+                (egui::Color32::from_rgb(220, 60, 50), "Off")
+            };
 
-                let is_powered_on = if !self.is_device_reachable {
-                    false
-                } else if self.device_details.is_tv {
-                    match self.device_details.power_mode.as_str() {
-                        "PowerOn" => true,
-                        "DisplayOff" | "Headless" => true,
-                        "PowerOff" | "Standby" => false,
-                        _ => self.is_device_reachable,
-                    }
-                } else {
-                    // For streaming sticks / players: if the television is off, consider Roku as being off
-                    self.tv_powered_on.load(Ordering::Relaxed)
-                };
+            let state_icon = match self.media_player.state.as_str() {
+                "play" => "▶ Playing",
+                "pause" => "⏸ Paused",
+                "buffer" => "⏳ Buffering",
+                _ => "",
+            };
 
-                let (power_icon_color, power_status_label) = if !self.is_device_reachable {
-                    (egui::Color32::from_rgb(220, 60, 50), "Offline")
-                } else if is_powered_on {
-                    (egui::Color32::from_rgb(46, 204, 113), "On")
-                } else {
-                    (egui::Color32::from_rgb(220, 60, 50), "Off")
-                };
+            let mut do_toggle_power = false;
+            let mut do_refresh_all = false;
+            let mut do_select_ip = None;
+            let mut switch_to_manual = false;
 
-                let (badge_rect, _) = ui.allocate_exact_size(egui::vec2(13.0, 14.0), egui::Sense::hover());
-                draw_power_icon(ui.painter(), badge_rect.center(), 4.5, power_icon_color, 1.6);
-                ui.label(
-                    egui::RichText::new(power_status_label)
-                        .size(11.5)
-                        .strong()
-                        .color(power_icon_color),
-                );
+            if is_wide {
+                // Global Header - Wide View
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("📺 Roku Remote")
+                            .strong()
+                            .size(17.0)
+                            .color(self.theme.foreground),
+                    );
 
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if self.is_scanning {
-                        ui.spinner();
-                    }
-                    if ui.add(egui::Button::new("Scan")).clicked() {
-                        self.is_scanning = true;
-                        self.status_text = "Scanning network...".into();
-                        self.start_discovery_scan();
-                    }
+                    // Display Roku custom friendly name
+                    ui.label(
+                        egui::RichText::new(format!("• {}", self.device_name))
+                            .size(13.0)
+                            .color(self.theme.dark_foreground),
+                    );
 
-                    // Single button to turn on and off the system
-                    let (power_label, power_bg, hover_bg) = if is_powered_on {
-                        (
-                            "Power Off",
-                            egui::Color32::from_rgb(195, 55, 55),
-                            egui::Color32::from_rgb(220, 68, 68),
-                        )
-                    } else {
-                        (
-                            "Power On",
-                            egui::Color32::from_rgb(38, 150, 78),
-                            egui::Color32::from_rgb(46, 172, 90),
-                        )
-                    };
+                    let (badge_rect, _) = ui.allocate_exact_size(egui::vec2(13.0, 14.0), egui::Sense::hover());
+                    draw_power_icon(ui.painter(), badge_rect.center(), 4.5, power_icon_color, 1.6);
+                    ui.label(
+                        egui::RichText::new(power_status_label)
+                            .size(11.5)
+                            .strong()
+                            .color(power_icon_color),
+                    );
 
-                    let btn_size = egui::vec2(104.0, 26.0);
-                    let (rect, response) = ui.allocate_exact_size(btn_size, egui::Sense::click());
-                    let visuals = ui.style().interact(&response);
-
-                    let bg = if response.is_pointer_button_down_on() {
-                        if is_powered_on {
-                            egui::Color32::from_rgb(170, 45, 45)
-                        } else {
-                            egui::Color32::from_rgb(30, 130, 65)
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if self.is_scanning {
+                            ui.spinner();
+                        } else if ui.add(egui::Button::new("Scan")).clicked() {
+                            do_refresh_all = true;
                         }
-                    } else if response.hovered() {
-                        hover_bg
-                    } else {
-                        power_bg
-                    };
 
-                    ui.painter().rect(rect, visuals.rounding, bg, visuals.bg_stroke);
+                        // Power button
+                        let (power_label, power_bg, hover_bg) = if is_powered_on {
+                            ("Power Off", egui::Color32::from_rgb(195, 55, 55), egui::Color32::from_rgb(220, 68, 68))
+                        } else {
+                            ("Power On", egui::Color32::from_rgb(38, 150, 78), egui::Color32::from_rgb(46, 172, 90))
+                        };
+                        let (rect, response) = ui.allocate_exact_size(egui::vec2(104.0, 26.0), egui::Sense::click());
+                        let visuals = ui.style().interact(&response);
+                        let bg = if response.is_pointer_button_down_on() {
+                            if is_powered_on { egui::Color32::from_rgb(170, 45, 45) } else { egui::Color32::from_rgb(30, 130, 65) }
+                        } else if response.hovered() { hover_bg } else { power_bg };
+                        ui.painter().rect(rect, visuals.rounding, bg, visuals.bg_stroke);
+                        let icon_center = egui::pos2(rect.min.x + 18.0, rect.center().y);
+                        draw_power_icon(ui.painter(), icon_center, 4.8, egui::Color32::WHITE, 1.8);
+                        let text_pos = egui::pos2(rect.min.x + 30.0, rect.center().y);
+                        ui.painter().text(text_pos, egui::Align2::LEFT_CENTER, power_label, egui::FontId::proportional(12.0), egui::Color32::WHITE);
+                        let tooltip = if self.device_details.is_tv {
+                            if is_powered_on { "Turn off Roku TV" } else { "Turn on Roku TV" }
+                        } else {
+                            if is_powered_on { "Turn off TV (HDMI-CEC Standby)" } else { "Turn on TV (HDMI-CEC 1-Touch Play)" }
+                        };
+                        if response.on_hover_text(tooltip).clicked() {
+                            do_toggle_power = true;
+                        }
 
-                    let icon_center = egui::pos2(rect.min.x + 18.0, rect.center().y);
-                    draw_power_icon(ui.painter(), icon_center, 4.8, egui::Color32::WHITE, 1.8);
-
-                    let text_pos = egui::pos2(rect.min.x + 30.0, rect.center().y);
-                    ui.painter().text(
-                        text_pos,
-                        egui::Align2::LEFT_CENTER,
-                        power_label,
-                        egui::FontId::proportional(12.0),
-                        egui::Color32::WHITE,
-                    );
-
-                    let tooltip = if self.device_details.is_tv {
-                        if is_powered_on { "Turn off Roku TV" } else { "Turn on Roku TV" }
-                    } else {
-                        if is_powered_on { "Turn off TV (HDMI-CEC Standby)" } else { "Turn on TV (HDMI-CEC 1-Touch Play)" }
-                    };
-
-                    if response.on_hover_text(tooltip).clicked() {
-                        self.toggle_power();
-                    }
-
-                    if ui.add(egui::Button::new("⚙ Setup")).clicked() {
-                        self.show_setup_guide = !self.show_setup_guide;
-                    }
-                    if ui.add(egui::Button::new("Device Info")).clicked() {
-                        self.show_device_info = !self.show_device_info;
-                    }
+                        if ui.add(egui::Button::new("⚙ Setup")).clicked() {
+                            self.show_setup_guide = !self.show_setup_guide;
+                        }
+                        if ui.add(egui::Button::new("Device Info")).clicked() {
+                            self.show_device_info = !self.show_device_info;
+                        }
+                    });
                 });
-            });
 
-            ui.add_space(2.0);
+                ui.add_space(2.0);
 
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Roku:").color(self.theme.dark_foreground));
+                // Row 2 - Wide View
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Roku:").color(self.theme.dark_foreground));
 
-                if self.manual_ip_mode {
-                    let text_edit = ui.add(
-                        egui::TextEdit::singleline(&mut self.selected_device_ip)
-                            .desired_width(120.0)
-                            .hint_text("192.168.x.x"),
-                    );
-                    if text_edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        self.select_device(&self.selected_device_ip.clone());
-                    }
-                    if ui.button("Connect").clicked() {
-                        self.select_device(&self.selected_device_ip.clone());
-                    }
-                    if ui.button("Discovered List").clicked() {
-                        self.manual_ip_mode = false;
-                    }
-                } else {
-                    let current_label = if let Some(d) = self.devices.iter().find(|d| d.ip == self.selected_device_ip) {
-                        format!("📺 {} ({})", d.name, d.ip)
-                    } else if !self.selected_device_ip.is_empty() {
-                        format!("📺 Custom ({})", self.selected_device_ip)
-                    } else if self.is_scanning {
-                        "Searching for devices...".to_string()
+                    if self.manual_ip_mode {
+                        let text_edit = ui.add(
+                            egui::TextEdit::singleline(&mut self.selected_device_ip)
+                                .desired_width(120.0)
+                                .hint_text("192.168.x.x"),
+                        );
+                        if text_edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            do_select_ip = Some(self.selected_device_ip.clone());
+                        }
+                        if ui.button("Connect").clicked() {
+                            do_select_ip = Some(self.selected_device_ip.clone());
+                        }
+                        if ui.button("Discovered List").clicked() {
+                            self.manual_ip_mode = false;
+                        }
                     } else {
-                        "No Roku detected".to_string()
-                    };
+                        let current_label = if let Some(d) = self.devices.iter().find(|d| d.ip == self.selected_device_ip) {
+                            format!("📺 {} ({})", d.name, d.ip)
+                        } else if !self.selected_device_ip.is_empty() {
+                            format!("📺 Custom ({})", self.selected_device_ip)
+                        } else if self.is_scanning {
+                            "Searching for devices...".to_string()
+                        } else {
+                            "No Roku detected".to_string()
+                        };
 
-                    let mut newly_selected_ip = None;
-                    let mut switch_to_manual = false;
-
-                    egui::ComboBox::from_id_salt("roku_device_combo")
-                        .selected_text(current_label)
-                        .width(220.0)
-                        .show_ui(ui, |ui| {
-                            if self.devices.is_empty() {
-                                let empty_msg = if self.is_scanning {
-                                    "⏳ Scanning network..."
+                        egui::ComboBox::from_id_salt("roku_device_combo_wide")
+                            .selected_text(current_label)
+                            .width(220.0)
+                            .show_ui(ui, |ui| {
+                                if self.devices.is_empty() {
+                                    let empty_msg = if self.is_scanning {
+                                        "⏳ Scanning network..."
+                                    } else {
+                                        "No Rokus found on network"
+                                    };
+                                    ui.label(egui::RichText::new(empty_msg).color(self.theme.dark_foreground));
                                 } else {
-                                    "No Rokus found on network"
-                                };
-                                ui.label(egui::RichText::new(empty_msg).color(self.theme.dark_foreground));
-                            } else {
-                                for dev in &self.devices {
-                                    let is_current = dev.ip == self.selected_device_ip;
-                                    let item_label = format!("📺 {} ({})", dev.name, dev.ip);
-                                    if ui.selectable_label(is_current, item_label).clicked() {
-                                        newly_selected_ip = Some(dev.ip.clone());
+                                    for dev in &self.devices {
+                                        let is_current = dev.ip == self.selected_device_ip;
+                                        let item_label = format!("📺 {} ({})", dev.name, dev.ip);
+                                        if ui.selectable_label(is_current, item_label).clicked() {
+                                            do_select_ip = Some(dev.ip.clone());
+                                        }
                                     }
                                 }
-                            }
-                            ui.separator();
-                            if ui.selectable_label(false, "+ Enter IP manually...").clicked() {
-                                switch_to_manual = true;
-                            }
-                        });
+                                ui.separator();
+                                if ui.selectable_label(false, "+ Enter IP manually...").clicked() {
+                                    switch_to_manual = true;
+                                }
+                            });
 
-                    if let Some(ip) = newly_selected_ip {
-                        self.select_device(&ip);
+                        if self.is_scanning || self.is_refreshing_apps {
+                            ui.spinner();
+                        } else if ui.button("🔄").on_hover_text("Refresh device info & scan network").clicked() {
+                            do_refresh_all = true;
+                        }
                     }
-                    if switch_to_manual {
-                        self.manual_ip_mode = true;
-                    }
 
-                    if ui.button("🔄").on_hover_text("Refresh connection & device status").clicked() {
-                        self.refresh_device_info();
-                    }
-                }
-
-                ui.add_space(8.0);
-                ui.label(egui::RichText::new("Current:").color(self.theme.dark_foreground));
-                ui.label(
-                    egui::RichText::new(&self.active_app)
-                        .strong()
-                        .color(self.theme.accent),
-                );
-
-                // Now Playing playback status
-                let state_icon = match self.media_player.state.as_str() {
-                    "play" => "▶ Playing",
-                    "pause" => "⏸ Paused",
-                    "buffer" => "⏳ Buffering",
-                    _ => "",
-                };
-
-                if !state_icon.is_empty() {
-                    ui.add_space(6.0);
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("Current:").color(self.theme.dark_foreground));
                     ui.label(
-                        egui::RichText::new(state_icon)
-                            .color(if self.media_player.state == "play" {
-                                egui::Color32::from_rgb(70, 190, 100)
-                            } else {
-                                egui::Color32::from_rgb(230, 170, 60)
-                            })
+                        egui::RichText::new(&self.active_app)
                             .strong()
-                            .size(11.5),
+                            .color(self.theme.accent),
                     );
-                }
 
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new(&self.status_text)
-                            .color(self.theme.dark_foreground)
-                            .size(11.0),
-                    );
+                    if !state_icon.is_empty() {
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new(state_icon)
+                                .color(if self.media_player.state == "play" {
+                                    egui::Color32::from_rgb(70, 190, 100)
+                                } else {
+                                    egui::Color32::from_rgb(230, 170, 60)
+                                })
+                                .strong()
+                                .size(11.5),
+                        );
+                    }
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new(&self.status_text)
+                                .color(self.theme.dark_foreground)
+                                .size(11.0),
+                        );
+                    });
                 });
-            });
+            } else {
+                // Global Header - Narrow View (Uncrowded, perfectly balanced)
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("📺 Roku Remote")
+                            .strong()
+                            .size(16.0)
+                            .color(self.theme.foreground),
+                    );
+
+                    let (badge_rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 13.0), egui::Sense::hover());
+                    draw_power_icon(ui.painter(), badge_rect.center(), 4.2, power_icon_color, 1.5);
+                    ui.label(
+                        egui::RichText::new(power_status_label)
+                            .size(11.0)
+                            .strong()
+                            .color(power_icon_color),
+                    );
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let (power_label, power_bg, hover_bg) = if is_powered_on {
+                            ("Power Off", egui::Color32::from_rgb(195, 55, 55), egui::Color32::from_rgb(220, 68, 68))
+                        } else {
+                            ("Power On", egui::Color32::from_rgb(38, 150, 78), egui::Color32::from_rgb(46, 172, 90))
+                        };
+                        let (rect, response) = ui.allocate_exact_size(egui::vec2(90.0, 24.0), egui::Sense::click());
+                        let visuals = ui.style().interact(&response);
+                        let bg = if response.is_pointer_button_down_on() {
+                            if is_powered_on { egui::Color32::from_rgb(170, 45, 45) } else { egui::Color32::from_rgb(30, 130, 65) }
+                        } else if response.hovered() { hover_bg } else { power_bg };
+                        ui.painter().rect(rect, visuals.rounding, bg, visuals.bg_stroke);
+                        let icon_center = egui::pos2(rect.min.x + 14.0, rect.center().y);
+                        draw_power_icon(ui.painter(), icon_center, 4.2, egui::Color32::WHITE, 1.6);
+                        let text_pos = egui::pos2(rect.min.x + 24.0, rect.center().y);
+                        ui.painter().text(text_pos, egui::Align2::LEFT_CENTER, power_label, egui::FontId::proportional(11.0), egui::Color32::WHITE);
+                        let tooltip = if self.device_details.is_tv {
+                            if is_powered_on { "Turn off Roku TV" } else { "Turn on Roku TV" }
+                        } else {
+                            if is_powered_on { "Turn off TV (HDMI-CEC Standby)" } else { "Turn on TV (HDMI-CEC 1-Touch Play)" }
+                        };
+                        if response.on_hover_text(tooltip).clicked() {
+                            do_toggle_power = true;
+                        }
+
+                        if ui.add(egui::Button::new("⚙ Setup")).clicked() {
+                            self.show_setup_guide = !self.show_setup_guide;
+                        }
+                        if ui.add(egui::Button::new("Device Info")).clicked() {
+                            self.show_device_info = !self.show_device_info;
+                        }
+                    });
+                });
+
+                ui.add_space(4.0);
+
+                // Row 2A - Narrow View: Device Selector across full width + Refresh button
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Roku:").strong().color(self.theme.dark_foreground));
+
+                    if self.manual_ip_mode {
+                        let text_edit = ui.add(
+                            egui::TextEdit::singleline(&mut self.selected_device_ip)
+                                .desired_width((ui.available_width() - 140.0).max(100.0))
+                                .hint_text("192.168.x.x"),
+                        );
+                        if text_edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            do_select_ip = Some(self.selected_device_ip.clone());
+                        }
+                        if ui.button("Connect").clicked() {
+                            do_select_ip = Some(self.selected_device_ip.clone());
+                        }
+                        if ui.button("List").clicked() {
+                            self.manual_ip_mode = false;
+                        }
+                    } else {
+                        let current_label = if let Some(d) = self.devices.iter().find(|d| d.ip == self.selected_device_ip) {
+                            format!("📺 {} ({})", d.name, d.ip)
+                        } else if !self.selected_device_ip.is_empty() {
+                            format!("📺 Custom ({})", self.selected_device_ip)
+                        } else if self.is_scanning {
+                            "Searching for devices...".to_string()
+                        } else {
+                            "No Roku detected".to_string()
+                        };
+
+                        let combo_w = (ui.available_width() - 38.0).max(160.0);
+                        egui::ComboBox::from_id_salt("roku_device_combo_narrow")
+                            .selected_text(current_label)
+                            .width(combo_w)
+                            .show_ui(ui, |ui| {
+                                if self.devices.is_empty() {
+                                    let empty_msg = if self.is_scanning {
+                                        "⏳ Scanning network..."
+                                    } else {
+                                        "No Rokus found on network"
+                                    };
+                                    ui.label(egui::RichText::new(empty_msg).color(self.theme.dark_foreground));
+                                } else {
+                                    for dev in &self.devices {
+                                        let is_current = dev.ip == self.selected_device_ip;
+                                        let item_label = format!("📺 {} ({})", dev.name, dev.ip);
+                                        if ui.selectable_label(is_current, item_label).clicked() {
+                                            do_select_ip = Some(dev.ip.clone());
+                                        }
+                                    }
+                                }
+                                ui.separator();
+                                if ui.selectable_label(false, "+ Enter IP manually...").clicked() {
+                                    switch_to_manual = true;
+                                }
+                            });
+
+                        if self.is_scanning || self.is_refreshing_apps {
+                            ui.spinner();
+                        } else if ui.button("🔄").on_hover_text("Refresh device info & scan network").clicked() {
+                            do_refresh_all = true;
+                        }
+                    }
+                });
+
+                ui.add_space(2.0);
+
+                // Row 2B - Narrow View: Now Playing on left, Status / Found count on right (No overlap!)
+                ui.horizontal(|ui| {
+                    if !self.active_app.is_empty() && self.active_app != "Loading..." {
+                        ui.label(egui::RichText::new("Current:").size(11.5).color(self.theme.dark_foreground));
+                        ui.label(
+                            egui::RichText::new(&self.active_app)
+                                .strong()
+                                .size(11.5)
+                                .color(self.theme.accent),
+                        );
+
+                        if !state_icon.is_empty() {
+                            ui.label(
+                                egui::RichText::new(state_icon)
+                                    .color(if self.media_player.state == "play" {
+                                        egui::Color32::from_rgb(70, 190, 100)
+                                    } else {
+                                        egui::Color32::from_rgb(230, 170, 60)
+                                    })
+                                    .strong()
+                                    .size(11.0),
+                            );
+                        }
+                    }
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new(&self.status_text)
+                                .color(self.theme.dark_foreground)
+                                .size(11.0),
+                        );
+                    });
+                });
+            }
+
+            if do_toggle_power {
+                self.toggle_power();
+            }
+            if do_refresh_all {
+                self.refresh_all();
+            }
+            if let Some(ip) = do_select_ip {
+                self.select_device(&ip);
+            }
+            if switch_to_manual {
+                self.manual_ip_mode = true;
+            }
 
             // Banner for Limited / Unreachable Mode
             let is_limited = self.is_device_reachable
