@@ -28,6 +28,7 @@ pub struct RokuRemoteApp {
     pub media_player: MediaPlayerInfo,
     pub device_details: DeviceDetails,
     pub is_device_reachable: bool,
+    pub tv_powered_on: Arc<AtomicBool>,
     pub show_device_info: bool,
     pub show_setup_guide: bool,
     pub manual_ip_mode: bool,
@@ -79,6 +80,7 @@ impl RokuRemoteApp {
             media_player: MediaPlayerInfo::default(),
             device_details: DeviceDetails::default(),
             is_device_reachable: false,
+            tv_powered_on: Arc::new(AtomicBool::new(false)),
             show_device_info: false,
             show_setup_guide: false,
             manual_ip_mode: false,
@@ -114,6 +116,7 @@ impl RokuRemoteApp {
         // Clear previous applications so we don't display stale apps
         self.apps.clear();
         self.app_textures.clear();
+        self.tv_powered_on.store(false, Ordering::Relaxed);
         self.is_refreshing_apps = true;
         self.refresh_device_info();
     }
@@ -147,6 +150,9 @@ impl RokuRemoteApp {
     }
 
     pub fn send_key(&self, key: &'static str) {
+        if key != "Power" && key != "PowerOff" {
+            self.tv_powered_on.store(true, Ordering::Relaxed);
+        }
         let ip = self.selected_device_ip.clone();
         let tx = self.tx.clone();
         let ctx = self.ctx.clone();
@@ -165,6 +171,7 @@ impl RokuRemoteApp {
     }
 
     pub fn power_on(&mut self) {
+        self.tv_powered_on.store(true, Ordering::Relaxed);
         if self.device_details.is_tv {
             self.device_details.power_mode = "PowerOn".to_string();
         }
@@ -214,6 +221,7 @@ impl RokuRemoteApp {
     }
 
     pub fn power_off(&mut self) {
+        self.tv_powered_on.store(false, Ordering::Relaxed);
         if self.device_details.is_tv {
             self.device_details.power_mode = "PowerOff".to_string();
         }
@@ -256,21 +264,24 @@ impl RokuRemoteApp {
     }
 
     pub fn toggle_power(&mut self) {
-        if self.device_details.is_tv {
-            let currently_on = self.is_device_reachable
-                && self.device_details.power_mode != "PowerOff"
-                && self.device_details.power_mode != "Standby";
-            if currently_on {
-                self.power_off();
-            } else {
-                self.power_on();
-            }
+        let is_currently_on = if !self.is_device_reachable {
+            false
+        } else if self.device_details.is_tv {
+            self.device_details.power_mode != "PowerOff"
+                && self.device_details.power_mode != "Standby"
+        } else {
+            self.tv_powered_on.load(Ordering::Relaxed)
+        };
+
+        if is_currently_on {
+            self.power_off();
         } else {
             self.power_on();
         }
     }
 
     pub fn launch_app(&self, app_id: String) {
+        self.tv_powered_on.store(true, Ordering::Relaxed);
         let ip = self.selected_device_ip.clone();
         let tx = self.tx.clone();
         let ctx = self.ctx.clone();
@@ -388,6 +399,9 @@ impl RokuRemoteApp {
                     self.theme = theme;
                 }
                 BackgroundMessage::MediaPlayerUpdated(info) => {
+                    if info.state == "play" {
+                        self.tv_powered_on.store(true, Ordering::Relaxed);
+                    }
                     self.media_player = info;
                 }
                 BackgroundMessage::DeviceDetailsUpdated(details) => {
@@ -397,6 +411,9 @@ impl RokuRemoteApp {
                         self.status_text = "Limited Mode - Setup Required".to_string();
                     } else if self.apps.is_empty() && self.is_device_reachable && !self.is_refreshing_apps {
                         self.refresh_apps();
+                    }
+                    if details.is_tv {
+                        self.tv_powered_on.store(details.power_mode != "PowerOff" && details.power_mode != "Standby", Ordering::Relaxed);
                     }
                     self.device_details = details;
                 }
@@ -1130,7 +1147,22 @@ impl eframe::App for RokuRemoteApp {
                             row("Software Version:", &self.device_details.software_version);
                             row("Wi-Fi Network:", &self.device_details.network_name);
                             row("Display Resolution:", &self.device_details.ui_resolution);
-                            row("Power Mode:", &self.device_details.power_mode);
+                            if self.device_details.is_tv {
+                                row("Power Mode:", &self.device_details.power_mode);
+                            } else {
+                                let dev_status = if self.is_device_reachable {
+                                    "Online"
+                                } else {
+                                    "Offline"
+                                };
+                                row("Device Status:", dev_status);
+                                let tv_status = if self.tv_powered_on.load(Ordering::Relaxed) {
+                                    "On"
+                                } else {
+                                    "Off"
+                                };
+                                row("TV Status:", tv_status);
+                            }
                             row("IP Address:", &self.selected_device_ip);
 
                             ui.label(egui::RichText::new("Mobile App Control:").strong().color(self.theme.accent));
@@ -1451,22 +1483,22 @@ impl eframe::App for RokuRemoteApp {
                         .color(self.theme.dark_foreground),
                 );
 
-                let is_tv = self.device_details.is_tv;
                 let is_powered_on = if !self.is_device_reachable {
                     false
-                } else {
+                } else if self.device_details.is_tv {
                     match self.device_details.power_mode.as_str() {
                         "PowerOn" => true,
                         "DisplayOff" | "Headless" => true,
                         "PowerOff" | "Standby" => false,
                         _ => self.is_device_reachable,
                     }
+                } else {
+                    // For streaming sticks / players: if the television is off, consider Roku as being off
+                    self.tv_powered_on.load(Ordering::Relaxed)
                 };
 
                 let (power_icon_color, power_status_label) = if !self.is_device_reachable {
                     (egui::Color32::from_rgb(220, 60, 50), "Offline")
-                } else if !is_tv {
-                    (egui::Color32::from_rgb(46, 204, 113), "Online")
                 } else if is_powered_on {
                     (egui::Color32::from_rgb(46, 204, 113), "On")
                 } else {
@@ -1492,106 +1524,59 @@ impl eframe::App for RokuRemoteApp {
                         self.start_discovery_scan();
                     }
 
-                    if is_tv {
-                        let (power_label, power_bg, hover_bg) = if is_powered_on {
-                            (
-                                "Power Off",
-                                egui::Color32::from_rgb(195, 55, 55),
-                                egui::Color32::from_rgb(220, 68, 68),
-                            )
-                        } else {
-                            (
-                                "Power On",
-                                egui::Color32::from_rgb(38, 150, 78),
-                                egui::Color32::from_rgb(46, 172, 90),
-                            )
-                        };
-
-                        let btn_size = egui::vec2(104.0, 26.0);
-                        let (rect, response) = ui.allocate_exact_size(btn_size, egui::Sense::click());
-                        let visuals = ui.style().interact(&response);
-
-                        let bg = if response.is_pointer_button_down_on() {
-                            if is_powered_on {
-                                egui::Color32::from_rgb(170, 45, 45)
-                            } else {
-                                egui::Color32::from_rgb(30, 130, 65)
-                            }
-                        } else if response.hovered() {
-                            hover_bg
-                        } else {
-                            power_bg
-                        };
-
-                        ui.painter().rect(rect, visuals.rounding, bg, visuals.bg_stroke);
-
-                        let icon_center = egui::pos2(rect.min.x + 18.0, rect.center().y);
-                        draw_power_icon(ui.painter(), icon_center, 4.8, egui::Color32::WHITE, 1.8);
-
-                        let text_pos = egui::pos2(rect.min.x + 30.0, rect.center().y);
-                        ui.painter().text(
-                            text_pos,
-                            egui::Align2::LEFT_CENTER,
-                            power_label,
-                            egui::FontId::proportional(12.0),
-                            egui::Color32::WHITE,
-                        );
-
-                        if response.clicked() {
-                            self.toggle_power();
-                        }
-                    } else {
-                        // Streaming stick / external player: provide explicit Power Off and Power On buttons (HDMI-CEC)
-                        // In right_to_left layout, add Power Off first, then Power On so Power On renders on the left
-                        let off_btn_size = egui::vec2(84.0, 26.0);
-                        let (off_rect, off_response) = ui.allocate_exact_size(off_btn_size, egui::Sense::click());
-                        let off_vis = ui.style().interact(&off_response);
-                        let off_bg = if off_response.is_pointer_button_down_on() {
-                            egui::Color32::from_rgb(170, 45, 45)
-                        } else if off_response.hovered() {
-                            egui::Color32::from_rgb(220, 68, 68)
-                        } else {
-                            egui::Color32::from_rgb(195, 55, 55)
-                        };
-                        ui.painter().rect(off_rect, off_vis.rounding, off_bg, off_vis.bg_stroke);
-                        let off_icon_center = egui::pos2(off_rect.min.x + 14.0, off_rect.center().y);
-                        draw_power_icon(ui.painter(), off_icon_center, 4.2, egui::Color32::WHITE, 1.6);
-                        let off_text_pos = egui::pos2(off_rect.min.x + 23.0, off_rect.center().y);
-                        ui.painter().text(
-                            off_text_pos,
-                            egui::Align2::LEFT_CENTER,
+                    // Single button to turn on and off the system
+                    let (power_label, power_bg, hover_bg) = if is_powered_on {
+                        (
                             "Power Off",
-                            egui::FontId::proportional(11.5),
-                            egui::Color32::WHITE,
-                        );
-                        if off_response.on_hover_text("Turn off TV screen (HDMI-CEC Standby)").clicked() {
-                            self.power_off();
-                        }
-
-                        let on_btn_size = egui::vec2(84.0, 26.0);
-                        let (on_rect, on_response) = ui.allocate_exact_size(on_btn_size, egui::Sense::click());
-                        let on_vis = ui.style().interact(&on_response);
-                        let on_bg = if on_response.is_pointer_button_down_on() {
-                            egui::Color32::from_rgb(30, 130, 65)
-                        } else if on_response.hovered() {
-                            egui::Color32::from_rgb(46, 172, 90)
-                        } else {
-                            egui::Color32::from_rgb(38, 150, 78)
-                        };
-                        ui.painter().rect(on_rect, on_vis.rounding, on_bg, on_vis.bg_stroke);
-                        let on_icon_center = egui::pos2(on_rect.min.x + 14.0, on_rect.center().y);
-                        draw_power_icon(ui.painter(), on_icon_center, 4.2, egui::Color32::WHITE, 1.6);
-                        let on_text_pos = egui::pos2(on_rect.min.x + 23.0, on_rect.center().y);
-                        ui.painter().text(
-                            on_text_pos,
-                            egui::Align2::LEFT_CENTER,
+                            egui::Color32::from_rgb(195, 55, 55),
+                            egui::Color32::from_rgb(220, 68, 68),
+                        )
+                    } else {
+                        (
                             "Power On",
-                            egui::FontId::proportional(11.5),
-                            egui::Color32::WHITE,
-                        );
-                        if on_response.on_hover_text("Turn on TV screen (HDMI-CEC 1-Touch Play)").clicked() {
-                            self.power_on();
+                            egui::Color32::from_rgb(38, 150, 78),
+                            egui::Color32::from_rgb(46, 172, 90),
+                        )
+                    };
+
+                    let btn_size = egui::vec2(104.0, 26.0);
+                    let (rect, response) = ui.allocate_exact_size(btn_size, egui::Sense::click());
+                    let visuals = ui.style().interact(&response);
+
+                    let bg = if response.is_pointer_button_down_on() {
+                        if is_powered_on {
+                            egui::Color32::from_rgb(170, 45, 45)
+                        } else {
+                            egui::Color32::from_rgb(30, 130, 65)
                         }
+                    } else if response.hovered() {
+                        hover_bg
+                    } else {
+                        power_bg
+                    };
+
+                    ui.painter().rect(rect, visuals.rounding, bg, visuals.bg_stroke);
+
+                    let icon_center = egui::pos2(rect.min.x + 18.0, rect.center().y);
+                    draw_power_icon(ui.painter(), icon_center, 4.8, egui::Color32::WHITE, 1.8);
+
+                    let text_pos = egui::pos2(rect.min.x + 30.0, rect.center().y);
+                    ui.painter().text(
+                        text_pos,
+                        egui::Align2::LEFT_CENTER,
+                        power_label,
+                        egui::FontId::proportional(12.0),
+                        egui::Color32::WHITE,
+                    );
+
+                    let tooltip = if self.device_details.is_tv {
+                        if is_powered_on { "Turn off Roku TV" } else { "Turn on Roku TV" }
+                    } else {
+                        if is_powered_on { "Turn off TV (HDMI-CEC Standby)" } else { "Turn on TV (HDMI-CEC 1-Touch Play)" }
+                    };
+
+                    if response.on_hover_text(tooltip).clicked() {
+                        self.toggle_power();
                     }
 
                     if ui.add(egui::Button::new("⚙ Setup")).clicked() {
