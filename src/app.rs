@@ -80,7 +80,7 @@ impl RokuRemoteApp {
             media_player: MediaPlayerInfo::default(),
             device_details: DeviceDetails::default(),
             is_device_reachable: false,
-            tv_powered_on: Arc::new(AtomicBool::new(false)),
+            tv_powered_on: Arc::new(AtomicBool::new(true)),
             show_device_info: false,
             show_setup_guide: false,
             manual_ip_mode: false,
@@ -116,7 +116,7 @@ impl RokuRemoteApp {
         // Clear previous applications so we don't display stale apps
         self.apps.clear();
         self.app_textures.clear();
-        self.tv_powered_on.store(false, Ordering::Relaxed);
+        self.tv_powered_on.store(true, Ordering::Relaxed);
         self.is_refreshing_apps = true;
         self.refresh_device_info();
     }
@@ -414,12 +414,19 @@ impl RokuRemoteApp {
                     }
                     if details.is_tv {
                         self.tv_powered_on.store(details.power_mode != "PowerOff" && details.power_mode != "Standby", Ordering::Relaxed);
+                    } else if details.power_mode == "PowerOff" || details.power_mode == "Standby" {
+                        self.tv_powered_on.store(false, Ordering::Relaxed);
                     }
                     self.device_details = details;
                 }
                 BackgroundMessage::PowerStateUpdated(reachable) => {
                     let was_reachable = self.is_device_reachable;
                     self.is_device_reachable = reachable;
+                    if !reachable {
+                        self.tv_powered_on.store(false, Ordering::Relaxed);
+                    } else if !was_reachable {
+                        self.tv_powered_on.store(true, Ordering::Relaxed);
+                    }
                     if !was_reachable && reachable && self.apps.is_empty() && !self.is_refreshing_apps {
                         let is_limited = self.device_details.ecp_setting_mode.eq_ignore_ascii_case("limited")
                             || self.device_details.ecp_setting_mode.eq_ignore_ascii_case("disabled");
