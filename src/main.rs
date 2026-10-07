@@ -31,6 +31,7 @@ fn main() -> Result<(), eframe::Error> {
 
     let native_options = eframe::NativeOptions {
         viewport,
+        persist_window: true,
         ..Default::default()
     };
 
