@@ -84,7 +84,8 @@ Roku Remote dynamically detects window width and automatically reflows its user 
 | **M** | Mute | Toggle audio mute |
 | **I** | Device Info | Toggle Roku Device Details / Info dialog |
 | **S** | Setup Guide | Toggle Setup & Troubleshooting Guide |
-| **Ctrl + Shift + M** / **Ctrl + M** | Always on Top | Toggle Always-on-Top (brings to compact size) |
+| **Ctrl + M** | Window Size | Toggle window size (Min / Full Screen) |
+| **Ctrl + Shift + M** | Always on Top | Toggle Always-on-Top (compact size) |
 | **Ctrl + Shift + R** or **Ctrl + A** | Refresh Apps | Check and reload installed apps & icons |
 | **Ctrl + ,** | Cheat Sheet | Toggle keyboard shortcuts modal |
 
