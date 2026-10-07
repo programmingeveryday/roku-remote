@@ -899,21 +899,17 @@ impl RokuRemoteApp {
 
     pub fn render_device_info_narrow(&mut self, ui: &mut egui::Ui, content_width: f32) {
         ui.horizontal(|ui| {
-            if ui.button("← Back to Remote").clicked() {
-                self.show_device_info = false;
-            }
+            ui.heading(
+                egui::RichText::new("ℹ Roku Device Details")
+                    .color(self.theme.foreground)
+                    .size(16.0),
+            );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Close").clicked() {
                     self.show_device_info = false;
                 }
             });
         });
-        ui.add_space(4.0);
-        ui.heading(
-            egui::RichText::new("ℹ Roku Device Details")
-                .color(self.theme.foreground)
-                .size(16.0),
-        );
         ui.separator();
         ui.add_space(4.0);
 
@@ -1106,7 +1102,7 @@ impl RokuRemoteApp {
             if ui.button("🔄 Refresh Info").clicked() {
                 self.refresh_device_info();
             }
-            if ui.button("← Back to Remote").clicked() {
+            if ui.button("Close").clicked() {
                 self.show_device_info = false;
             }
         });
@@ -1115,21 +1111,17 @@ impl RokuRemoteApp {
 
     pub fn render_setup_guide_narrow(&mut self, ui: &mut egui::Ui, content_width: f32) {
         ui.horizontal(|ui| {
-            if ui.button("← Back to Remote").clicked() {
-                self.show_setup_guide = false;
-            }
+            ui.heading(
+                egui::RichText::new("⚙ Setup & Troubleshooting")
+                    .color(self.theme.foreground)
+                    .size(16.0),
+            );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Close").clicked() {
                     self.show_setup_guide = false;
                 }
             });
         });
-        ui.add_space(4.0);
-        ui.heading(
-            egui::RichText::new("⚙ Setup & Troubleshooting")
-                .color(self.theme.foreground)
-                .size(16.0),
-        );
         ui.add(
             egui::Label::new(
                 egui::RichText::new("Follow these steps if your Roku is not discovered or commands are not responding:")
@@ -1303,7 +1295,7 @@ impl RokuRemoteApp {
                 self.show_device_info = true;
                 self.show_setup_guide = false;
             }
-            if ui.button("← Back to Remote").clicked() {
+            if ui.button("Close").clicked() {
                 self.show_setup_guide = false;
             }
         });
@@ -1312,21 +1304,17 @@ impl RokuRemoteApp {
 
     pub fn render_shortcuts_narrow(&mut self, ui: &mut egui::Ui, content_width: f32) {
         ui.horizontal(|ui| {
-            if ui.button("← Back to Remote").clicked() {
-                self.show_shortcuts = false;
-            }
+            ui.heading(
+                egui::RichText::new("⌨ Keyboard Shortcuts")
+                    .color(self.theme.foreground)
+                    .size(16.0),
+            );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Close").clicked() {
                     self.show_shortcuts = false;
                 }
             });
         });
-        ui.add_space(4.0);
-        ui.heading(
-            egui::RichText::new("⌨ Keyboard Shortcuts")
-                .color(self.theme.foreground)
-                .size(16.0),
-        );
         ui.label(
             egui::RichText::new("Control Roku directly with your keyboard:")
                 .size(11.5)
@@ -1381,7 +1369,7 @@ impl RokuRemoteApp {
         ui.separator();
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui.button("← Back to Remote").clicked() {
+            if ui.button("Close").clicked() {
                 self.show_shortcuts = false;
             }
         });
