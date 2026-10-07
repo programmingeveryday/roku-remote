@@ -149,7 +149,37 @@ impl RokuRemoteApp {
         start_scan(self.tx.clone(), self.ctx.clone());
     }
 
+    pub fn replay(&self) {
+        self.tv_powered_on.store(true, Ordering::Relaxed);
+        let ip = self.selected_device_ip.clone();
+        let tx = self.tx.clone();
+        let ctx = self.ctx.clone();
+        thread::spawn(move || {
+            let client = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_millis(1000))
+                .build();
+            if let Ok(c) = client {
+                // Hit rewind 5 times (~5 seconds back)
+                for _ in 0..5 {
+                    let rev_url = format!("http://{}:8060/keypress/Rev", ip);
+                    let _ = c.post(&rev_url).send();
+                    thread::sleep(Duration::from_millis(80));
+                }
+                // Resume playback
+                let play_url = format!("http://{}:8060/keypress/Play", ip);
+                let _ = c.post(&play_url).send();
+            }
+            thread::sleep(Duration::from_millis(800));
+            update_active_app_worker(&ip, &tx, &ctx);
+            update_media_player_worker(&ip, &tx, &ctx);
+        });
+    }
+
     pub fn send_key(&self, key: &'static str) {
+        if key == "InstantReplay" || key == "Replay" {
+            self.replay();
+            return;
+        }
         if key != "Power" && key != "PowerOff" {
             self.tv_powered_on.store(true, Ordering::Relaxed);
         }
@@ -589,7 +619,7 @@ impl RokuRemoteApp {
                 let spacing = ((width - (btn_nav.x * 2.0)) / 3.0).max(12.0);
                 ui.add_space(spacing);
                 if ui.add_sized(btn_nav, egui::Button::new("Replay")).clicked() {
-                    self.send_key("InstantReplay");
+                    self.replay();
                 }
                 ui.add_space(spacing);
                 if ui.add_sized(btn_nav, egui::Button::new("Info (*)")).clicked() {
@@ -928,7 +958,7 @@ impl RokuRemoteApp {
             } else if key_h {
                 self.send_key("Home"); // Home Button
             } else if key_r {
-                self.send_key("InstantReplay"); // Replay Button
+                self.replay(); // Replay Button (5x Rev + Play)
             } else if key_i {
                 self.send_key("Info"); // Info / Options Button
             } else if key_p {
