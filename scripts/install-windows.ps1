@@ -36,6 +36,12 @@ $BinTarget = Join-Path $InstallDir "roku-remote-rs.exe"
 Write-Host "Installing executable to $BinTarget..." -ForegroundColor Yellow
 Copy-Item -Path $BinSource -Destination $BinTarget -Force
 
+$IconSource = Join-Path $ProjectDir "assets\icon.ico"
+$IconTarget = Join-Path $InstallDir "roku-remote.ico"
+if (Test-Path $IconSource) {
+    Copy-Item -Path $IconSource -Destination $IconTarget -Force
+}
+
 # 4. Add to User PATH if not already present
 $UserPath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::User)
 if ($UserPath -notlike "*$InstallDir*") {
@@ -52,10 +58,13 @@ $WshShell = New-Object -ComObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
 $Shortcut.TargetPath = $BinTarget
 $Shortcut.WorkingDirectory = $InstallDir
+if (Test-Path $IconTarget) {
+    $Shortcut.IconLocation = "$IconTarget,0"
+}
 $Shortcut.Description = "Native Roku Remote Control"
 $Shortcut.Save()
 
-Write-Host "✓ Successfully built and installed Roku Remote for Windows!" -ForegroundColor Green
+Write-Host "[+] Successfully built and installed Roku Remote for Windows!" -ForegroundColor Green
 Write-Host "Executable: $BinTarget"
 Write-Host "Start Menu: $ShortcutPath"
 Write-Host "You can now launch 'Roku Remote' from the Start Menu or run 'roku-remote-rs' in PowerShell/Command Prompt."

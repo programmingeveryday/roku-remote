@@ -938,6 +938,7 @@ impl RokuRemoteApp {
     }
 }
 
+#[cfg(unix)]
 fn is_hyprland_focused() -> Option<bool> {
     let sig = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok()?;
     let xdg = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/run/user/1000".to_string());
@@ -953,6 +954,11 @@ fn is_hyprland_focused() -> Option<bool> {
     let text = String::from_utf8_lossy(&buf);
     let my_pid = std::process::id();
     Some(text.contains(&format!("\"pid\": {}", my_pid)))
+}
+
+#[cfg(not(unix))]
+fn is_hyprland_focused() -> Option<bool> {
+    None
 }
 
 fn draw_power_icon(

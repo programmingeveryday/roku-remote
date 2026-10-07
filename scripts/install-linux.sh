@@ -32,14 +32,22 @@ fi
 # Target directories
 INSTALL_DIR="${HOME}/.local/bin"
 DESKTOP_DIR="${HOME}/.local/share/applications"
+ICON_DIR="${HOME}/.local/share/icons/hicolor/128x128/apps"
 
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$DESKTOP_DIR"
+mkdir -p "$ICON_DIR"
 
 echo -e "${YELLOW}Installing executable to ${INSTALL_DIR}...${NC}"
 rm -f "$INSTALL_DIR/roku-remote-rs"
 cp "$BIN_SOURCE" "$INSTALL_DIR/roku-remote-rs"
 chmod +x "$INSTALL_DIR/roku-remote-rs"
+
+# Install icon if available
+if [[ -f "$PROJECT_DIR/assets/icon-128.png" ]]; then
+    echo -e "${YELLOW}Installing application icon to ${ICON_DIR}...${NC}"
+    cp "$PROJECT_DIR/assets/icon-128.png" "$ICON_DIR/org.omarchy.roku.remote.png"
+fi
 
 echo -e "${YELLOW}Creating desktop launcher in ${DESKTOP_DIR}...${NC}"
 cat <<EOF > "$DESKTOP_DIR/org.omarchy.roku.remote.desktop"
@@ -47,7 +55,7 @@ cat <<EOF > "$DESKTOP_DIR/org.omarchy.roku.remote.desktop"
 Name=Roku Remote
 Comment=Native Roku Remote Control with Omarchy Theming and Keyboard Shortcuts
 Exec=${INSTALL_DIR}/roku-remote-rs
-Icon=video-display
+Icon=org.omarchy.roku.remote
 Terminal=false
 Type=Application
 Categories=AudioVideo;Utility;Network;

@@ -9,3 +9,6 @@ reqwest = { version = "0.12", features = ["blocking"] }
 quick-xml = "0.36"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+
