@@ -714,6 +714,7 @@ impl RokuRemoteApp {
                     .color(self.theme.foreground),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(2.0);
                 let refresh_text = if self.is_refreshing_apps {
                     "⏳"
                 } else if is_compact {
@@ -1754,22 +1755,23 @@ impl eframe::App for RokuRemoteApp {
                     );
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(2.0);
                         let (power_label, power_bg, hover_bg) = if is_powered_on {
                             ("Power Off", egui::Color32::from_rgb(195, 55, 55), egui::Color32::from_rgb(220, 68, 68))
                         } else {
                             ("Power On", egui::Color32::from_rgb(38, 150, 78), egui::Color32::from_rgb(46, 172, 90))
                         };
-                        let btn_w = if is_very_narrow { 80.0 } else { 88.0 };
+                        let btn_w = if is_very_narrow { 76.0 } else { 86.0 };
                         let (rect, response) = ui.allocate_exact_size(egui::vec2(btn_w, 24.0), egui::Sense::click());
                         let visuals = ui.style().interact(&response);
                         let bg = if response.is_pointer_button_down_on() {
                             if is_powered_on { egui::Color32::from_rgb(170, 45, 45) } else { egui::Color32::from_rgb(30, 130, 65) }
                         } else if response.hovered() { hover_bg } else { power_bg };
                         ui.painter().rect(rect, visuals.rounding, bg, visuals.bg_stroke);
-                        let icon_center = egui::pos2(rect.min.x + 12.0, rect.center().y);
-                        draw_power_icon(ui.painter(), icon_center, 4.0, egui::Color32::WHITE, 1.5);
-                        let text_pos = egui::pos2(rect.min.x + 22.0, rect.center().y);
-                        ui.painter().text(text_pos, egui::Align2::LEFT_CENTER, power_label, egui::FontId::proportional(11.0), egui::Color32::WHITE);
+                        let icon_center = egui::pos2(rect.min.x + 11.0, rect.center().y);
+                        draw_power_icon(ui.painter(), icon_center, 3.8, egui::Color32::WHITE, 1.4);
+                        let text_pos = egui::pos2(rect.min.x + 19.0, rect.center().y);
+                        ui.painter().text(text_pos, egui::Align2::LEFT_CENTER, power_label, egui::FontId::proportional(10.5), egui::Color32::WHITE);
                         let tooltip = if self.device_details.is_tv {
                             if is_powered_on { "Turn off Roku TV" } else { "Turn on Roku TV" }
                         } else {
@@ -1785,6 +1787,7 @@ impl eframe::App for RokuRemoteApp {
 
                 // Row 2: Device Selector (Left) + Integrated Quick Action Toolbar [🔄, ℹ, ⚙] (Right)
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
                     if self.manual_ip_mode {
                         let text_edit = ui.add(
                             egui::TextEdit::singleline(&mut self.selected_device_ip)
@@ -1802,8 +1805,14 @@ impl eframe::App for RokuRemoteApp {
                         }
                     } else {
                         let current_label = if let Some(d) = self.devices.iter().find(|d| d.ip == self.selected_device_ip) {
-                            if is_very_narrow && d.name.len() > 16 {
-                                format!("📺 {}", &d.name[..15])
+                            if is_very_narrow {
+                                if d.name.len() > 14 {
+                                    format!("📺 {}…", &d.name[..13])
+                                } else {
+                                    format!("📺 {}", d.name)
+                                }
+                            } else if d.name.len() > 24 {
+                                format!("📺 {}…", &d.name[..23])
                             } else {
                                 format!("📺 {}", d.name)
                             }
@@ -1815,8 +1824,8 @@ impl eframe::App for RokuRemoteApp {
                             "No Roku".to_string()
                         };
 
-                        let toolbar_reserved = if total_width >= 460.0 { 150.0 } else { 88.0 };
-                        let combo_w = (ui.available_width() - toolbar_reserved).max(90.0);
+                        let toolbar_reserved = if total_width >= 460.0 { 190.0 } else { 88.0 };
+                        let combo_w = (ui.available_width() - toolbar_reserved).max(80.0);
 
                         egui::ComboBox::from_id_salt("roku_device_combo_narrow")
                             .selected_text(current_label)
@@ -1844,10 +1853,11 @@ impl eframe::App for RokuRemoteApp {
                                 }
                             });
 
-                        // Action toolbar buttons
+                        // Action toolbar buttons with explicit sizing & tight spacing
+                        let btn_size = egui::vec2(24.0, 24.0);
                         if self.is_scanning || self.is_refreshing_apps {
-                            ui.spinner();
-                        } else if ui.button("🔄").on_hover_text("Refresh device info & scan network").clicked() {
+                            ui.add_sized(btn_size, egui::Spinner::new());
+                        } else if ui.add_sized(btn_size, egui::Button::new("🔄")).on_hover_text("Refresh device info & scan network").clicked() {
                             do_refresh_all = true;
                         }
 
@@ -1859,10 +1869,10 @@ impl eframe::App for RokuRemoteApp {
                                 self.show_setup_guide = !self.show_setup_guide;
                             }
                         } else {
-                            if ui.button("ℹ").on_hover_text("Roku Device Details").clicked() {
+                            if ui.add_sized(btn_size, egui::Button::new("ℹ")).on_hover_text("Roku Device Details").clicked() {
                                 self.show_device_info = !self.show_device_info;
                             }
-                            if ui.button("⚙").on_hover_text("Setup & Troubleshooting Guide").clicked() {
+                            if ui.add_sized(btn_size, egui::Button::new("⚙")).on_hover_text("Setup & Troubleshooting Guide").clicked() {
                                 self.show_setup_guide = !self.show_setup_guide;
                             }
                         }
@@ -1873,6 +1883,7 @@ impl eframe::App for RokuRemoteApp {
 
                 // Row 3: Active App / Now Playing & Status
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
                     let has_active = !self.active_app.is_empty() && self.active_app != "Loading...";
                     if has_active {
                         ui.label(egui::RichText::new("Current:").size(11.0).color(self.theme.dark_foreground));
@@ -1905,6 +1916,7 @@ impl eframe::App for RokuRemoteApp {
 
                     if !has_active || total_width >= 350.0 {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add_space(2.0);
                             ui.label(
                                 egui::RichText::new(&self.status_text)
                                     .color(self.theme.dark_foreground)
@@ -1935,24 +1947,24 @@ impl eframe::App for RokuRemoteApp {
 
             if is_limited {
                 ui.add_space(2.0);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label(
-                        egui::RichText::new("\u{26A0} Roku Mobile App Control is 'Limited' (remote keypresses blocked).")
+                        egui::RichText::new("\u{26A0} Roku Mobile App Control is 'Limited'.")
                             .color(egui::Color32::from_rgb(240, 160, 40))
-                            .size(12.0)
+                            .size(11.5)
                             .strong(),
                     );
-                    if ui.button(egui::RichText::new("⚙ Setup Instructions").color(egui::Color32::from_rgb(240, 160, 40))).clicked() {
+                    if ui.button(egui::RichText::new("⚙ Setup").color(egui::Color32::from_rgb(240, 160, 40))).clicked() {
                         self.show_setup_guide = true;
                     }
                 });
             } else if !self.is_device_reachable && !self.is_scanning && !self.selected_device_ip.is_empty() {
                 ui.add_space(2.0);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label(
-                        egui::RichText::new(format!("\u{26A0} Roku unreachable at {}. Verify network & power.", self.selected_device_ip))
+                        egui::RichText::new(format!("\u{26A0} Roku unreachable at {}.", self.selected_device_ip))
                             .color(egui::Color32::from_rgb(220, 80, 70))
-                            .size(12.0),
+                            .size(11.5),
                     );
                     if ui.button("⚙ Setup Guide").clicked() {
                         self.show_setup_guide = true;
@@ -1983,7 +1995,7 @@ impl eframe::App for RokuRemoteApp {
                 });
             } else {
                 // NARROW SCREEN: Top-level ScrollArea
-                let content_width = 380.0f32.min(total_width - 12.0).max(280.0);
+                let content_width = (total_width - 12.0).clamp(260.0, 380.0);
                 let horizontal_margin = ((total_width - content_width) / 2.0).max(0.0);
 
                 egui::ScrollArea::vertical()
