@@ -897,6 +897,497 @@ impl RokuRemoteApp {
         Some(buttons_top_y)
     }
 
+    pub fn render_device_info_narrow(&mut self, ui: &mut egui::Ui, content_width: f32) {
+        ui.horizontal(|ui| {
+            if ui.button("← Back to Remote").clicked() {
+                self.show_device_info = false;
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Close").clicked() {
+                    self.show_device_info = false;
+                }
+            });
+        });
+        ui.add_space(4.0);
+        ui.heading(
+            egui::RichText::new("ℹ Roku Device Details")
+                .color(self.theme.foreground)
+                .size(16.0),
+        );
+        ui.separator();
+        ui.add_space(4.0);
+
+        egui::Frame::none()
+            .fill(self.theme.lighter_background)
+            .rounding(6.0)
+            .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+            .show(ui, |ui| {
+                let col1_w = 110.0f32;
+                let col2_w = (content_width - col1_w - 32.0).max(110.0);
+
+                egui::Grid::new("device_details_narrow_grid")
+                    .spacing([8.0, 6.0])
+                    .min_col_width(col1_w)
+                    .max_col_width(col2_w)
+                    .show(ui, |ui| {
+                        let mut row = |label: &str, val: &str| {
+                            ui.label(egui::RichText::new(label).strong().color(self.theme.accent).size(12.0));
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(if val.is_empty() { "—" } else { val })
+                                        .color(self.theme.foreground)
+                                        .size(12.0),
+                                )
+                                .wrap_mode(egui::TextWrapMode::Wrap),
+                            );
+                            ui.end_row();
+                        };
+
+                        row("Device Name:", &self.device_name);
+                        let device_type = if self.device_details.is_tv {
+                            "Roku TV"
+                        } else {
+                            "Streaming Stick / Player"
+                        };
+                        row("Device Type:", device_type);
+                        row("Model Name:", &self.device_details.model_name);
+                        row("Model Number:", &self.device_details.model_number);
+                        row("Location:", &self.device_details.user_location);
+                        row("Software Version:", &self.device_details.software_version);
+                        row("Wi-Fi Network:", &self.device_details.network_name);
+                        row("Display Resolution:", &self.device_details.ui_resolution);
+                        if self.device_details.is_tv {
+                            row("Power Mode:", &self.device_details.power_mode);
+                        } else {
+                            let dev_status = if self.is_device_reachable {
+                                "Online"
+                            } else {
+                                "Offline"
+                            };
+                            row("Device Status:", dev_status);
+                            let tv_status = if self.tv_powered_on.load(Ordering::Relaxed) {
+                                "On"
+                            } else {
+                                "Off"
+                            };
+                            row("TV Status:", tv_status);
+                        }
+                        row("IP Address:", &self.selected_device_ip);
+
+                        ui.label(egui::RichText::new("Mobile Control:").strong().color(self.theme.accent).size(12.0));
+                        let ecp_mode = if self.device_details.ecp_setting_mode.is_empty() {
+                            "—"
+                        } else {
+                            &self.device_details.ecp_setting_mode
+                        };
+                        let (ecp_display, ecp_color) = match ecp_mode.to_lowercase().as_str() {
+                            "limited" => ("Limited (Commands blocked)", egui::Color32::from_rgb(235, 150, 35)),
+                            "disabled" => ("Disabled", egui::Color32::from_rgb(220, 60, 50)),
+                            "permissive" | "default" => (ecp_mode, egui::Color32::from_rgb(46, 204, 113)),
+                            _ => (ecp_mode, self.theme.foreground),
+                        };
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(ecp_display)
+                                    .color(ecp_color)
+                                    .size(12.0),
+                            )
+                            .wrap_mode(egui::TextWrapMode::Wrap),
+                        );
+                        ui.end_row();
+
+                        let is_active = self.is_active.load(Ordering::Relaxed);
+                        ui.label(egui::RichText::new("App Status:").strong().color(self.theme.accent).size(12.0));
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            let (icon_rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                            let center = icon_rect.center();
+                            if is_active {
+                                ui.painter().circle_filled(center, 3.5, egui::Color32::from_rgb(46, 204, 113));
+                                ui.painter().circle_stroke(
+                                    center,
+                                    5.5,
+                                    egui::Stroke::new(1.0f32, egui::Color32::from_rgba_premultiplied(46, 204, 113, 100)),
+                                );
+                                ui.label(
+                                    egui::RichText::new("Live (Active)")
+                                        .color(egui::Color32::from_rgb(46, 204, 113))
+                                        .strong()
+                                        .size(12.0),
+                                );
+                            } else {
+                                ui.painter().circle_stroke(
+                                    center,
+                                    4.0,
+                                    egui::Stroke::new(1.3f32, egui::Color32::from_rgb(155, 168, 190)),
+                                );
+                                ui.painter().circle_filled(
+                                    center,
+                                    1.6,
+                                    egui::Color32::from_rgb(155, 168, 190),
+                                );
+                                ui.label(
+                                    egui::RichText::new("Sleeping (Idle)")
+                                        .color(egui::Color32::from_rgb(155, 168, 190))
+                                        .strong()
+                                        .size(12.0),
+                                );
+                            }
+                        });
+                        ui.end_row();
+                    });
+            });
+
+        let is_limited = self.device_details.ecp_setting_mode.eq_ignore_ascii_case("limited")
+            || self.device_details.ecp_setting_mode.eq_ignore_ascii_case("disabled");
+        let is_unreachable = !self.is_device_reachable && !self.selected_device_ip.is_empty();
+
+        if is_limited || is_unreachable {
+            ui.add_space(8.0);
+            let (title, desc, border_color) = if is_limited {
+                (
+                    "Mobile Control is Limited",
+                    "Roku is rejecting remote commands.\nEnable 'Control by mobile apps' in Roku TV settings.",
+                    egui::Color32::from_rgb(220, 150, 40),
+                )
+            } else {
+                (
+                    "Roku Unreachable",
+                    "Unable to communicate with Roku over Wi-Fi.\nCheck TV power and verify network connection.",
+                    egui::Color32::from_rgb(220, 75, 65),
+                )
+            };
+
+            egui::Frame::none()
+                .fill(self.theme.lighter_background)
+                .stroke(egui::Stroke::new(1.0f32, border_color))
+                .rounding(6.0)
+                .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("\u{26A0}")
+                                .size(16.0)
+                                .color(border_color),
+                        );
+                        ui.add_space(4.0);
+                        ui.vertical(|ui| {
+                            ui.label(
+                                egui::RichText::new(title)
+                                    .strong()
+                                    .size(12.0)
+                                    .color(border_color),
+                            );
+                            ui.add_space(1.0);
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(desc)
+                                        .size(11.0)
+                                        .color(self.theme.foreground),
+                                )
+                                .wrap_mode(egui::TextWrapMode::Wrap),
+                            );
+                        });
+                    });
+                });
+        }
+
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
+            if is_limited || is_unreachable {
+                if ui.button("⚙ Setup Guide").clicked() {
+                    self.show_setup_guide = true;
+                    self.show_device_info = false;
+                }
+            }
+            if ui.button("🔄 Refresh Info").clicked() {
+                self.refresh_device_info();
+            }
+            if ui.button("← Back to Remote").clicked() {
+                self.show_device_info = false;
+            }
+        });
+        ui.add_space(16.0);
+    }
+
+    pub fn render_setup_guide_narrow(&mut self, ui: &mut egui::Ui, content_width: f32) {
+        ui.horizontal(|ui| {
+            if ui.button("← Back to Remote").clicked() {
+                self.show_setup_guide = false;
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Close").clicked() {
+                    self.show_setup_guide = false;
+                }
+            });
+        });
+        ui.add_space(4.0);
+        ui.heading(
+            egui::RichText::new("⚙ Setup & Troubleshooting")
+                .color(self.theme.foreground)
+                .size(16.0),
+        );
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new("Follow these steps if your Roku is not discovered or commands are not responding:")
+                    .color(self.theme.dark_foreground)
+                    .size(11.5),
+            )
+            .wrap_mode(egui::TextWrapMode::Wrap),
+        );
+        ui.separator();
+        ui.add_space(6.0);
+
+        // Section 1: Enable Mobile App Control (ECP)
+        ui.label(
+            egui::RichText::new("1. Enable Mobile App Control (ECP)")
+                .strong()
+                .size(13.0)
+                .color(self.theme.accent),
+        );
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new("Roku requires external control permission. In 'Limited' mode, commands like Keypress and App launch are rejected by Roku:")
+                    .size(11.5)
+                    .color(self.theme.foreground),
+            )
+            .wrap_mode(egui::TextWrapMode::Wrap),
+        );
+        ui.add_space(4.0);
+
+        egui::Frame::none()
+            .fill(self.theme.lighter_background)
+            .rounding(6.0)
+            .inner_margin(8.0)
+            .show(ui, |ui| {
+                let steps = [
+                    ("Step 1", "Using physical Roku remote, press the Home button."),
+                    ("Step 2", "Navigate to Settings > System."),
+                    ("Step 3", "Select Advanced system settings."),
+                    ("Step 4", "Select Control by mobile apps > Network access."),
+                    ("Step 5", "Select 'Default' or 'Permissive' (do not leave on 'Limited')."),
+                ];
+                for (step, desc) in steps {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(egui::RichText::new(format!("{}:", step)).strong().color(self.theme.accent).size(11.5));
+                        ui.label(egui::RichText::new(desc).size(11.5).color(self.theme.foreground));
+                    });
+                    ui.add_space(2.0);
+                }
+            });
+
+        ui.add_space(8.0);
+
+        // Section 2: Wi-Fi Network & Router
+        ui.label(
+            egui::RichText::new("2. Wi-Fi & Subnet Setup")
+                .strong()
+                .size(13.0)
+                .color(self.theme.accent),
+        );
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new("• Ensure computer and Roku are connected to the exact same Wi-Fi network.\n• Verify router does not have 'AP Isolation' / 'Client Isolation' enabled.")
+                    .size(11.5)
+                    .color(self.theme.foreground),
+            )
+            .wrap_mode(egui::TextWrapMode::Wrap),
+        );
+
+        ui.add_space(8.0);
+
+        // Section 3: Manual IP Entry
+        ui.label(
+            egui::RichText::new("3. Find Your Roku IP Manually")
+                .strong()
+                .size(13.0)
+                .color(self.theme.accent),
+        );
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new("If your router blocks discovery broadcasts:\n• On Roku: Settings > Network > About > IP address.\n• In this app: Select 'Enter IP manually' in the device dropdown.")
+                    .size(11.5)
+                    .color(self.theme.foreground),
+            )
+            .wrap_mode(egui::TextWrapMode::Wrap),
+        );
+
+        ui.add_space(8.0);
+
+        // Section 4: TV Power & HDMI-CEC Control
+        ui.label(
+            egui::RichText::new("4. TV Power via Roku (HDMI-CEC)")
+                .strong()
+                .size(13.0)
+                .color(self.theme.accent),
+        );
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new("Roku Streaming Sticks turn on the connected TV screen using HDMI-CEC:\n• On Roku: Settings > System > Control other devices (CEC) > Check '1-touch play'.\n• On your TV: Enable HDMI-CEC in your TV's settings menu (e.g. AnyNet+, Bravia Sync, SimpLink).")
+                    .size(11.5)
+                    .color(self.theme.foreground),
+            )
+            .wrap_mode(egui::TextWrapMode::Wrap),
+        );
+
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(4.0);
+
+        // Status Summary Card
+        ui.label(
+            egui::RichText::new("Current Device Status:")
+                .strong()
+                .color(self.theme.accent)
+                .size(12.5),
+        );
+        egui::Frame::none()
+            .fill(self.theme.lighter_background)
+            .rounding(6.0)
+            .inner_margin(8.0)
+            .show(ui, |ui| {
+                let col1_w = 110.0f32;
+                let col2_w = (content_width - col1_w - 32.0).max(110.0);
+                egui::Grid::new("setup_status_narrow_grid")
+                    .spacing([8.0, 4.0])
+                    .min_col_width(col1_w)
+                    .max_col_width(col2_w)
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("Selected IP:").size(11.5));
+                        ui.label(egui::RichText::new(&self.selected_device_ip).monospace().size(11.5));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Connection:").size(11.5));
+                        let (reach_label, reach_color) = if self.is_device_reachable {
+                            ("Reachable / Online", egui::Color32::from_rgb(46, 204, 113))
+                        } else {
+                            ("Unreachable / Offline", egui::Color32::from_rgb(220, 60, 50))
+                        };
+                        ui.label(egui::RichText::new(reach_label).strong().color(reach_color).size(11.5));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Mobile Control:").size(11.5));
+                        let mode_str = if self.device_details.ecp_setting_mode.is_empty() {
+                            "Unknown"
+                        } else {
+                            &self.device_details.ecp_setting_mode
+                        };
+                        let mode_color = match mode_str.to_lowercase().as_str() {
+                            "default" | "permissive" => egui::Color32::from_rgb(46, 204, 113),
+                            "limited" | "disabled" => egui::Color32::from_rgb(240, 160, 40),
+                            _ => self.theme.foreground,
+                        };
+                        ui.label(egui::RichText::new(mode_str).strong().color(mode_color).size(11.5));
+                        ui.end_row();
+                    });
+            });
+
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(6.0);
+
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
+            if ui.button("🔍 Scan Network").clicked() {
+                self.is_scanning = true;
+                self.status_text = "Scanning network...".into();
+                self.start_discovery_scan();
+            }
+            if ui.button("🔄 Re-test Connection").clicked() {
+                self.refresh_device_info();
+            }
+            if ui.button("ℹ Device Details").clicked() {
+                self.show_device_info = true;
+                self.show_setup_guide = false;
+            }
+            if ui.button("← Back to Remote").clicked() {
+                self.show_setup_guide = false;
+            }
+        });
+        ui.add_space(16.0);
+    }
+
+    pub fn render_shortcuts_narrow(&mut self, ui: &mut egui::Ui, content_width: f32) {
+        ui.horizontal(|ui| {
+            if ui.button("← Back to Remote").clicked() {
+                self.show_shortcuts = false;
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Close").clicked() {
+                    self.show_shortcuts = false;
+                }
+            });
+        });
+        ui.add_space(4.0);
+        ui.heading(
+            egui::RichText::new("⌨ Keyboard Shortcuts")
+                .color(self.theme.foreground)
+                .size(16.0),
+        );
+        ui.label(
+            egui::RichText::new("Control Roku directly with your keyboard:")
+                .size(11.5)
+                .color(self.theme.foreground),
+        );
+        ui.separator();
+        ui.add_space(4.0);
+
+        egui::Frame::none()
+            .fill(self.theme.lighter_background)
+            .rounding(6.0)
+            .inner_margin(egui::Margin::symmetric(8.0, 8.0))
+            .show(ui, |ui| {
+                let col2_w = 95.0f32;
+                let col3_w = (content_width - col2_w - 55.0).max(90.0);
+
+                egui::Grid::new("shortcuts_narrow_grid")
+                    .spacing([8.0, 6.0])
+                    .max_col_width(col3_w)
+                    .show(ui, |ui| {
+                        let shortcuts = [
+                            ("🎯", "Arrow Keys", "Navigate Up / Down / Left / Right"),
+                            ("🔘", "Enter / Space", "OK / Select"),
+                            ("🔊", "Ctrl + Up / Down", "Volume Up / Down"),
+                            ("⏩", "Ctrl + Left / Right", "Rewind (<<) / Fast Forward (>>)"),
+                            ("↩", "Backspace / Esc", "Back"),
+                            ("🏠", "H", "Home"),
+                            ("▶⏸", "P", "Play / Pause"),
+                            ("↺", "R", "Instant Replay"),
+                            ("✱", "I", "Info / Options (*)"),
+                            ("🔇", "Ctrl + M", "Mute"),
+                            ("🔄", "Ctrl + Shift + R", "Refresh Quick Launch Apps"),
+                            ("💡", "Ctrl + ,", "Toggle shortcuts guide"),
+                        ];
+                        for (icon, keys, desc) in shortcuts {
+                            ui.label(icon);
+                            ui.label(egui::RichText::new(keys).strong().color(self.theme.accent).size(11.5));
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(desc)
+                                        .color(self.theme.foreground)
+                                        .size(11.5),
+                                )
+                                .wrap_mode(egui::TextWrapMode::Wrap),
+                            );
+                            ui.end_row();
+                        }
+                    });
+            });
+
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui.button("← Back to Remote").clicked() {
+                self.show_shortcuts = false;
+            }
+        });
+        ui.add_space(16.0);
+    }
+
     pub fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
         let (
             ctrl,
@@ -1111,443 +1602,454 @@ impl eframe::App for RokuRemoteApp {
         self.handle_incoming_messages(ctx);
         self.handle_keyboard_shortcuts(ctx);
 
-        // Keyboard Shortcuts Modal Window
-        if self.show_shortcuts {
-            egui::Window::new("⌨ Keyboard Shortcuts")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-                .show(ctx, |ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-                    ui.label(
-                        egui::RichText::new("Control Roku directly with your keyboard:")
-                            .strong()
-                            .color(self.theme.foreground),
-                    );
-                    ui.separator();
+        // In wide view (>= 680px), show dialogs as centered floating modal windows.
+        // In narrow view (< 680px), dialogs are rendered cleanly in-page inside CentralPanel.
+        let is_wide = ctx.screen_rect().width() >= 680.0;
+        let max_modal_w = (ctx.screen_rect().width() - 40.0).max(300.0);
 
-                    egui::Grid::new("shortcuts_grid")
-                        .spacing([14.0, 8.0])
-                        .show(ui, |ui| {
-                            // Column 1: Icon, Column 2: Key combo, Column 3: Description
-                            ui.label("🎯");
-                            ui.label(egui::RichText::new("Arrow Keys").strong().color(self.theme.accent));
-                            ui.label(egui::RichText::new("Navigate Up / Down / Left / Right").color(self.theme.foreground));
-                            ui.end_row();
+        if is_wide {
+            // Keyboard Shortcuts Modal Window
+            if self.show_shortcuts {
+                egui::Window::new("⌨ Keyboard Shortcuts")
+                    .collapsible(false)
+                    .resizable(false)
+                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .max_width(max_modal_w)
+                    .show(ctx, |ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+                        ui.label(
+                            egui::RichText::new("Control Roku directly with your keyboard:")
+                                .strong()
+                                .color(self.theme.foreground),
+                        );
+                        ui.separator();
 
-                            ui.label("🔘");
-                            ui.label(egui::RichText::new("Enter / Space").strong().color(self.theme.accent));
-                            ui.label(egui::RichText::new("OK / Select").color(self.theme.foreground));
-                            ui.end_row();
-
-                            ui.label("🔊");
-                            ui.label(egui::RichText::new("Ctrl + Up / Down").strong().color(self.theme.accent));
-                            ui.label(egui::RichText::new("Volume Up / Volume Down").color(self.theme.foreground));
-                            ui.end_row();
-
-                            ui.label("⏩");
-                            ui.label(egui::RichText::new("Ctrl + Left / Right").strong().color(self.theme.accent));
-                            ui.label(egui::RichText::new("Rewind (<<) / Fast Forward (>>)").color(self.theme.foreground));
-                            ui.end_row();
-
-                            ui.label("↩");
-                            ui.label(egui::RichText::new("Backspace / Esc").strong().color(self.theme.accent));
-                            ui.label(egui::RichText::new("Back").color(self.theme.foreground));
-                            ui.end_row();
-
-                            ui.label("🏠");
-                            ui.label(egui::RichText::new("H").strong().color(self.theme.accent));
-                            ui.label(egui::RichText::new("Home").color(self.theme.foreground));
-                            ui.end_row();
-
-                            ui.label("▶⏸");
-                            ui.label(egui::RichText::new("P").strong().color(self.theme.accent));
-                            ui.label(egui::RichText::new("Play / Pause").color(self.theme.foreground));
-                            ui.end_row();
-
-                            ui.label("↺");
-                            ui.label(egui::RichText::new("R").strong().color(self.theme.accent));
-                            ui.label(egui::RichText::new("Instant Replay").color(self.theme.foreground));
-                            ui.end_row();
-
-                            ui.label("✱");
-                            ui.label(egui::RichText::new("I").strong().color(self.theme.accent));
-                            ui.label(egui::RichText::new("Info / Options (*)").color(self.theme.foreground));
-                            ui.end_row();
-
-                            ui.label("🔇");
-                            ui.label(egui::RichText::new("Ctrl + M").strong().color(self.theme.accent));
-                            ui.label(egui::RichText::new("Mute").color(self.theme.foreground));
-                            ui.end_row();
-
-                            ui.label("🔄");
-                            ui.label(egui::RichText::new("Ctrl + Shift + R").strong().color(self.theme.accent));
-                            ui.label(egui::RichText::new("Refresh Quick Launch Apps").color(self.theme.foreground));
-                            ui.end_row();
-
-                            ui.label("💡");
-                            ui.label(egui::RichText::new("Ctrl + ,").strong().color(self.theme.accent));
-                            ui.label(egui::RichText::new("Toggle this shortcuts cheat sheet").color(self.theme.foreground));
-                            ui.end_row();
-                        });
-
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.horizontal(|ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Close (Esc)").clicked() {
-                                self.show_shortcuts = false;
-                            }
-                        });
-                    });
-                });
-        }
-
-        // Device Info Modal Window
-        if self.show_device_info {
-            egui::Window::new("ℹ Roku Device Details")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-                .default_width(380.0)
-                .show(ctx, |ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-                    egui::Grid::new("device_details_grid")
-                        .spacing([14.0, 8.0])
-                        .show(ui, |ui| {
-                            let mut row = |label: &str, val: &str| {
-                                ui.label(egui::RichText::new(label).strong().color(self.theme.accent));
-                                ui.label(egui::RichText::new(if val.is_empty() { "—" } else { val }).color(self.theme.foreground));
+                        egui::Grid::new("shortcuts_grid")
+                            .spacing([14.0, 8.0])
+                            .show(ui, |ui| {
+                                // Column 1: Icon, Column 2: Key combo, Column 3: Description
+                                ui.label("🎯");
+                                ui.label(egui::RichText::new("Arrow Keys").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("Navigate Up / Down / Left / Right").color(self.theme.foreground));
                                 ui.end_row();
-                            };
 
-                            row("Device Name:", &self.device_name);
-                            let device_type = if self.device_details.is_tv {
-                                "Roku TV"
-                            } else {
-                                "Streaming Stick / Player"
-                            };
-                            row("Device Type:", device_type);
-                            row("Model Name:", &self.device_details.model_name);
-                            row("Model Number:", &self.device_details.model_number);
-                            row("Location:", &self.device_details.user_location);
-                            row("Software Version:", &self.device_details.software_version);
-                            row("Wi-Fi Network:", &self.device_details.network_name);
-                            row("Display Resolution:", &self.device_details.ui_resolution);
-                            if self.device_details.is_tv {
-                                row("Power Mode:", &self.device_details.power_mode);
-                            } else {
-                                let dev_status = if self.is_device_reachable {
-                                    "Online"
-                                } else {
-                                    "Offline"
-                                };
-                                row("Device Status:", dev_status);
-                                let tv_status = if self.tv_powered_on.load(Ordering::Relaxed) {
-                                    "On"
-                                } else {
-                                    "Off"
-                                };
-                                row("TV Status:", tv_status);
-                            }
-                            row("IP Address:", &self.selected_device_ip);
+                                ui.label("🔘");
+                                ui.label(egui::RichText::new("Enter / Space").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("OK / Select").color(self.theme.foreground));
+                                ui.end_row();
 
-                            ui.label(egui::RichText::new("Mobile App Control:").strong().color(self.theme.accent));
-                            let ecp_mode = if self.device_details.ecp_setting_mode.is_empty() {
-                                "—"
-                            } else {
-                                &self.device_details.ecp_setting_mode
-                            };
-                            let (ecp_display, ecp_color) = match ecp_mode.to_lowercase().as_str() {
-                                "limited" => ("Limited (Commands blocked)", egui::Color32::from_rgb(235, 150, 35)),
-                                "disabled" => ("Disabled", egui::Color32::from_rgb(220, 60, 50)),
-                                "permissive" | "default" => (ecp_mode, egui::Color32::from_rgb(46, 204, 113)),
-                                _ => (ecp_mode, self.theme.foreground),
-                            };
-                            ui.label(egui::RichText::new(ecp_display).color(ecp_color));
-                            ui.end_row();
+                                ui.label("🔊");
+                                ui.label(egui::RichText::new("Ctrl + Up / Down").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("Volume Up / Volume Down").color(self.theme.foreground));
+                                ui.end_row();
 
-                            let is_active = self.is_active.load(Ordering::Relaxed);
-                            ui.label(egui::RichText::new("App Status:").strong().color(self.theme.accent));
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 6.0;
-                                let (icon_rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
-                                let center = icon_rect.center();
-                                if is_active {
-                                    // Glowing live dot
-                                    ui.painter().circle_filled(center, 4.0, egui::Color32::from_rgb(46, 204, 113));
-                                    ui.painter().circle_stroke(
-                                        center,
-                                        6.0,
-                                        egui::Stroke::new(1.2f32, egui::Color32::from_rgba_premultiplied(46, 204, 113, 100)),
-                                    );
-                                    ui.label(
-                                        egui::RichText::new("Live (Active)")
-                                            .color(egui::Color32::from_rgb(46, 204, 113))
-                                            .strong(),
-                                    );
-                                } else {
-                                    // Sleeping/idle indicator ring with inner dot
-                                    ui.painter().circle_stroke(
-                                        center,
-                                        4.5,
-                                        egui::Stroke::new(1.5f32, egui::Color32::from_rgb(155, 168, 190)),
-                                    );
-                                    ui.painter().circle_filled(
-                                        center,
-                                        1.8,
-                                        egui::Color32::from_rgb(155, 168, 190),
-                                    );
-                                    ui.label(
-                                        egui::RichText::new("Sleeping (Idle)")
-                                            .color(egui::Color32::from_rgb(155, 168, 190))
-                                            .strong(),
-                                    );
+                                ui.label("⏩");
+                                ui.label(egui::RichText::new("Ctrl + Left / Right").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("Rewind (<<) / Fast Forward (>>)").color(self.theme.foreground));
+                                ui.end_row();
+
+                                ui.label("↩");
+                                ui.label(egui::RichText::new("Backspace / Esc").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("Back").color(self.theme.foreground));
+                                ui.end_row();
+
+                                ui.label("🏠");
+                                ui.label(egui::RichText::new("H").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("Home").color(self.theme.foreground));
+                                ui.end_row();
+
+                                ui.label("▶⏸");
+                                ui.label(egui::RichText::new("P").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("Play / Pause").color(self.theme.foreground));
+                                ui.end_row();
+
+                                ui.label("↺");
+                                ui.label(egui::RichText::new("R").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("Instant Replay").color(self.theme.foreground));
+                                ui.end_row();
+
+                                ui.label("✱");
+                                ui.label(egui::RichText::new("I").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("Info / Options (*)").color(self.theme.foreground));
+                                ui.end_row();
+
+                                ui.label("🔇");
+                                ui.label(egui::RichText::new("Ctrl + M").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("Mute").color(self.theme.foreground));
+                                ui.end_row();
+
+                                ui.label("🔄");
+                                ui.label(egui::RichText::new("Ctrl + Shift + R").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("Refresh Quick Launch Apps").color(self.theme.foreground));
+                                ui.end_row();
+
+                                ui.label("💡");
+                                ui.label(egui::RichText::new("Ctrl + ,").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("Toggle this shortcuts cheat sheet").color(self.theme.foreground));
+                                ui.end_row();
+                            });
+
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.button("Close (Esc)").clicked() {
+                                    self.show_shortcuts = false;
                                 }
                             });
-                            ui.end_row();
-                        });
-
-                    let is_limited = self.device_details.ecp_setting_mode.eq_ignore_ascii_case("limited")
-                        || self.device_details.ecp_setting_mode.eq_ignore_ascii_case("disabled");
-                    let is_unreachable = !self.is_device_reachable && !self.selected_device_ip.is_empty();
-
-                    if is_limited || is_unreachable {
-                        ui.add_space(6.0);
-                        let (title, desc, border_color) = if is_limited {
-                            (
-                                "Mobile Control is Limited",
-                                "Roku is rejecting remote commands.\nEnable 'Control by mobile apps' in Roku TV settings.",
-                                egui::Color32::from_rgb(220, 150, 40),
-                            )
-                        } else {
-                            (
-                                "Roku Unreachable",
-                                "Unable to communicate with Roku over Wi-Fi.\nCheck TV power and verify network connection.",
-                                egui::Color32::from_rgb(220, 75, 65),
-                            )
-                        };
-
-                        egui::Frame::none()
-                            .fill(self.theme.lighter_background)
-                            .stroke(egui::Stroke::new(1.0f32, border_color))
-                            .rounding(6.0)
-                            .inner_margin(egui::Margin::symmetric(10.0, 8.0))
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        egui::RichText::new("\u{26A0}")
-                                            .size(16.0)
-                                            .color(border_color),
-                                    );
-                                    ui.add_space(4.0);
-                                    ui.vertical(|ui| {
-                                        ui.label(
-                                            egui::RichText::new(title)
-                                                .strong()
-                                                .size(12.0)
-                                                .color(border_color),
-                                        );
-                                        ui.add_space(1.0);
-                                        ui.label(
-                                            egui::RichText::new(desc)
-                                                .size(11.0)
-                                                .color(self.theme.foreground),
-                                        );
-                                    });
-                                });
-                            });
-                    }
-
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.horizontal(|ui| {
-                        if is_limited || is_unreachable {
-                            if ui.button("⚙ Setup Guide").clicked() {
-                                self.show_setup_guide = true;
-                            }
-                        }
-
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Close").clicked() {
-                                self.show_device_info = false;
-                            }
                         });
                     });
-                });
-        }
+            }
 
-        // Roku Setup Guide Modal Window
-        if self.show_setup_guide {
-            egui::Window::new("⚙ Roku Setup & Troubleshooting Guide")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-                .default_width(450.0)
-                .show(ctx, |ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
+            // Device Info Modal Window
+            if self.show_device_info {
+                egui::Window::new("ℹ Roku Device Details")
+                    .collapsible(false)
+                    .resizable(false)
+                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .default_width(380.0)
+                    .max_width(max_modal_w)
+                    .show(ctx, |ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+                        egui::Grid::new("device_details_grid")
+                            .spacing([14.0, 8.0])
+                            .show(ui, |ui| {
+                                let mut row = |label: &str, val: &str| {
+                                    ui.label(egui::RichText::new(label).strong().color(self.theme.accent));
+                                    ui.label(egui::RichText::new(if val.is_empty() { "—" } else { val }).color(self.theme.foreground));
+                                    ui.end_row();
+                                };
 
-                    ui.heading("Connect & Enable Roku Remote Access");
-                    ui.label(
-                        egui::RichText::new("Follow these steps if your Roku is not discovered or commands are not responding:")
-                            .color(self.theme.foreground),
-                    );
-                    ui.separator();
+                                row("Device Name:", &self.device_name);
+                                let device_type = if self.device_details.is_tv {
+                                    "Roku TV"
+                                } else {
+                                    "Streaming Stick / Player"
+                                };
+                                row("Device Type:", device_type);
+                                row("Model Name:", &self.device_details.model_name);
+                                row("Model Number:", &self.device_details.model_number);
+                                row("Location:", &self.device_details.user_location);
+                                row("Software Version:", &self.device_details.software_version);
+                                row("Wi-Fi Network:", &self.device_details.network_name);
+                                row("Display Resolution:", &self.device_details.ui_resolution);
+                                if self.device_details.is_tv {
+                                    row("Power Mode:", &self.device_details.power_mode);
+                                } else {
+                                    let dev_status = if self.is_device_reachable {
+                                        "Online"
+                                    } else {
+                                        "Offline"
+                                    };
+                                    row("Device Status:", dev_status);
+                                    let tv_status = if self.tv_powered_on.load(Ordering::Relaxed) {
+                                        "On"
+                                    } else {
+                                        "Off"
+                                    };
+                                    row("TV Status:", tv_status);
+                                }
+                                row("IP Address:", &self.selected_device_ip);
 
-                    egui::ScrollArea::vertical()
-                        .max_height(360.0)
-                        .show(ui, |ui| {
-                            // Section 1: Enable Mobile App Control (ECP)
-                            ui.label(
-                                egui::RichText::new("1. Enable Mobile App Control (ECP)")
-                                    .strong()
-                                    .size(13.5)
-                                    .color(self.theme.accent),
-                            );
-                            ui.label(
-                                egui::RichText::new("Roku requires external control permission. In 'Limited' mode, commands like Keypress and App launch are rejected by Roku:")
-                                    .size(11.5)
-                                    .color(self.theme.foreground),
-                            );
+                                ui.label(egui::RichText::new("Mobile App Control:").strong().color(self.theme.accent));
+                                let ecp_mode = if self.device_details.ecp_setting_mode.is_empty() {
+                                    "—"
+                                } else {
+                                    &self.device_details.ecp_setting_mode
+                                };
+                                let (ecp_display, ecp_color) = match ecp_mode.to_lowercase().as_str() {
+                                    "limited" => ("Limited (Commands blocked)", egui::Color32::from_rgb(235, 150, 35)),
+                                    "disabled" => ("Disabled", egui::Color32::from_rgb(220, 60, 50)),
+                                    "permissive" | "default" => (ecp_mode, egui::Color32::from_rgb(46, 204, 113)),
+                                    _ => (ecp_mode, self.theme.foreground),
+                                };
+                                ui.label(egui::RichText::new(ecp_display).color(ecp_color));
+                                ui.end_row();
+
+                                let is_active = self.is_active.load(Ordering::Relaxed);
+                                ui.label(egui::RichText::new("App Status:").strong().color(self.theme.accent));
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 6.0;
+                                    let (icon_rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+                                    let center = icon_rect.center();
+                                    if is_active {
+                                        // Glowing live dot
+                                        ui.painter().circle_filled(center, 4.0, egui::Color32::from_rgb(46, 204, 113));
+                                        ui.painter().circle_stroke(
+                                            center,
+                                            6.0,
+                                            egui::Stroke::new(1.2f32, egui::Color32::from_rgba_premultiplied(46, 204, 113, 100)),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new("Live (Active)")
+                                                .color(egui::Color32::from_rgb(46, 204, 113))
+                                                .strong(),
+                                        );
+                                    } else {
+                                        // Sleeping/idle indicator ring with inner dot
+                                        ui.painter().circle_stroke(
+                                            center,
+                                            4.5,
+                                            egui::Stroke::new(1.5f32, egui::Color32::from_rgb(155, 168, 190)),
+                                        );
+                                        ui.painter().circle_filled(
+                                            center,
+                                            1.8,
+                                            egui::Color32::from_rgb(155, 168, 190),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new("Sleeping (Idle)")
+                                                .color(egui::Color32::from_rgb(155, 168, 190))
+                                                .strong(),
+                                        );
+                                    }
+                                });
+                                ui.end_row();
+                            });
+
+                        let is_limited = self.device_details.ecp_setting_mode.eq_ignore_ascii_case("limited")
+                            || self.device_details.ecp_setting_mode.eq_ignore_ascii_case("disabled");
+                        let is_unreachable = !self.is_device_reachable && !self.selected_device_ip.is_empty();
+
+                        if is_limited || is_unreachable {
+                            ui.add_space(6.0);
+                            let (title, desc, border_color) = if is_limited {
+                                (
+                                    "Mobile Control is Limited",
+                                    "Roku is rejecting remote commands.\nEnable 'Control by mobile apps' in Roku TV settings.",
+                                    egui::Color32::from_rgb(220, 150, 40),
+                                )
+                            } else {
+                                (
+                                    "Roku Unreachable",
+                                    "Unable to communicate with Roku over Wi-Fi.\nCheck TV power and verify network connection.",
+                                    egui::Color32::from_rgb(220, 75, 65),
+                                )
+                            };
 
                             egui::Frame::none()
                                 .fill(self.theme.lighter_background)
-                                .rounding(4.0)
-                                .inner_margin(8.0)
+                                .stroke(egui::Stroke::new(1.0f32, border_color))
+                                .rounding(6.0)
+                                .inner_margin(egui::Margin::symmetric(10.0, 8.0))
                                 .show(ui, |ui| {
-                                    egui::Grid::new("setup_steps_grid")
-                                        .spacing([8.0, 4.0])
-                                        .show(ui, |ui| {
-                                            ui.label(egui::RichText::new("Step 1:").strong().color(self.theme.accent));
-                                            ui.label("Using your physical Roku remote, press the Home button.");
-                                            ui.end_row();
-
-                                            ui.label(egui::RichText::new("Step 2:").strong().color(self.theme.accent));
-                                            ui.label("Navigate to Settings > System.");
-                                            ui.end_row();
-
-                                            ui.label(egui::RichText::new("Step 3:").strong().color(self.theme.accent));
-                                            ui.label("Select Advanced system settings.");
-                                            ui.end_row();
-
-                                            ui.label(egui::RichText::new("Step 4:").strong().color(self.theme.accent));
-                                            ui.label("Select Control by mobile apps > Network access.");
-                                            ui.end_row();
-
-                                            ui.label(egui::RichText::new("Step 5:").strong().color(self.theme.accent));
-                                            ui.label("Select 'Default' or 'Permissive' (do not leave on 'Limited').");
-                                            ui.end_row();
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            egui::RichText::new("\u{26A0}")
+                                                .size(16.0)
+                                                .color(border_color),
+                                        );
+                                        ui.add_space(4.0);
+                                        ui.vertical(|ui| {
+                                            ui.label(
+                                                egui::RichText::new(title)
+                                                    .strong()
+                                                    .size(12.0)
+                                                    .color(border_color),
+                                            );
+                                            ui.add_space(1.0);
+                                            ui.label(
+                                                egui::RichText::new(desc)
+                                                    .size(11.0)
+                                                    .color(self.theme.foreground),
+                                            );
                                         });
+                                    });
                                 });
-
-                            ui.add_space(6.0);
-
-                            // Section 2: Wi-Fi Network & Router
-                            ui.label(
-                                egui::RichText::new("2. Wi-Fi & Subnet Setup")
-                                    .strong()
-                                    .size(13.5)
-                                    .color(self.theme.accent),
-                            );
-                            ui.label(
-                                egui::RichText::new("• Ensure your computer and Roku are connected to the exact same Wi-Fi network.\n• Verify router does not have 'AP Isolation' / 'Client Isolation' enabled.")
-                                    .size(11.5)
-                                    .color(self.theme.foreground),
-                            );
-
-                            ui.add_space(6.0);
-
-                            // Section 3: Manual IP Entry
-                            ui.label(
-                                egui::RichText::new("3. Find Your Roku IP Manually")
-                                    .strong()
-                                    .size(13.5)
-                                    .color(self.theme.accent),
-                            );
-                            ui.label(
-                                egui::RichText::new("If your router blocks discovery broadcasts:\n• On Roku: Settings > Network > About > IP address.\n• In this app: Select 'Enter IP manually' in the device selector dropdown.")
-                                    .size(11.5)
-                                    .color(self.theme.foreground),
-                            );
-
-                            ui.add_space(6.0);
-
-                            // Section 4: TV Power & HDMI-CEC Control
-                            ui.label(
-                                egui::RichText::new("4. TV Power via Roku (HDMI-CEC)")
-                                    .strong()
-                                    .size(13.5)
-                                    .color(self.theme.accent),
-                            );
-                            ui.label(
-                                egui::RichText::new("Roku Streaming Sticks turn on the connected TV screen using HDMI-CEC:\n• On Roku: Settings > System > Control other devices (CEC) > Check '1-touch play'.\n• On your TV: Enable HDMI-CEC in your TV's settings menu (e.g. AnyNet+, Bravia Sync, SimpLink, CEC).")
-                                    .size(11.5)
-                                    .color(self.theme.foreground),
-                            );
-
-                            ui.add_space(8.0);
-                            ui.separator();
-                            ui.add_space(4.0);
-
-                            // Status Summary
-                            ui.label(
-                                egui::RichText::new("Current Device Status:")
-                                    .strong()
-                                    .color(self.theme.accent),
-                            );
-
-                            egui::Grid::new("setup_status_grid")
-                                .spacing([10.0, 4.0])
-                                .show(ui, |ui| {
-                                    ui.label("Selected IP:");
-                                    ui.label(egui::RichText::new(&self.selected_device_ip).monospace());
-                                    ui.end_row();
-
-                                    ui.label("Connection:");
-                                    let (reach_label, reach_color) = if self.is_device_reachable {
-                                        ("Reachable / Online", egui::Color32::from_rgb(46, 204, 113))
-                                    } else {
-                                        ("Unreachable / Offline", egui::Color32::from_rgb(220, 60, 50))
-                                    };
-                                    ui.label(egui::RichText::new(reach_label).strong().color(reach_color));
-                                    ui.end_row();
-
-                                    ui.label("Mobile App Control:");
-                                    let mode_str = if self.device_details.ecp_setting_mode.is_empty() {
-                                        "Unknown"
-                                    } else {
-                                        &self.device_details.ecp_setting_mode
-                                    };
-                                    let mode_color = match mode_str.to_lowercase().as_str() {
-                                        "default" | "permissive" => egui::Color32::from_rgb(46, 204, 113),
-                                        "limited" | "disabled" => egui::Color32::from_rgb(240, 160, 40),
-                                        _ => self.theme.foreground,
-                                    };
-                                    ui.label(egui::RichText::new(mode_str).strong().color(mode_color));
-                                    ui.end_row();
-                                });
-                        });
-
-                    ui.add_space(8.0);
-                    ui.separator();
-
-                    ui.horizontal(|ui| {
-                        if ui.button("🔍 Scan Network").clicked() {
-                            self.is_scanning = true;
-                            self.status_text = "Scanning network...".into();
-                            self.start_discovery_scan();
-                        }
-                        if ui.button("🔄 Re-test Connection").clicked() {
-                            self.refresh_device_info();
                         }
 
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Close").clicked() {
-                                self.show_setup_guide = false;
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            if is_limited || is_unreachable {
+                                if ui.button("⚙ Setup Guide").clicked() {
+                                    self.show_setup_guide = true;
+                                    self.show_device_info = false;
+                                }
                             }
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.button("Close").clicked() {
+                                    self.show_device_info = false;
+                                }
+                            });
                         });
                     });
-                });
+            }
+
+            // Roku Setup Guide Modal Window
+            if self.show_setup_guide {
+                egui::Window::new("⚙ Roku Setup & Troubleshooting Guide")
+                    .collapsible(false)
+                    .resizable(false)
+                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .default_width(450.0)
+                    .max_width(max_modal_w)
+                    .show(ctx, |ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
+
+                        ui.heading("Connect & Enable Roku Remote Access");
+                        ui.label(
+                            egui::RichText::new("Follow these steps if your Roku is not discovered or commands are not responding:")
+                                .color(self.theme.foreground),
+                        );
+                        ui.separator();
+
+                        egui::ScrollArea::vertical()
+                            .max_height(360.0)
+                            .show(ui, |ui| {
+                                // Section 1: Enable Mobile App Control (ECP)
+                                ui.label(
+                                    egui::RichText::new("1. Enable Mobile App Control (ECP)")
+                                        .strong()
+                                        .size(13.5)
+                                        .color(self.theme.accent),
+                                );
+                                ui.label(
+                                    egui::RichText::new("Roku requires external control permission. In 'Limited' mode, commands like Keypress and App launch are rejected by Roku:")
+                                        .size(11.5)
+                                        .color(self.theme.foreground),
+                                );
+
+                                egui::Frame::none()
+                                    .fill(self.theme.lighter_background)
+                                    .rounding(4.0)
+                                    .inner_margin(8.0)
+                                    .show(ui, |ui| {
+                                        egui::Grid::new("setup_steps_grid")
+                                            .spacing([8.0, 4.0])
+                                            .show(ui, |ui| {
+                                                ui.label(egui::RichText::new("Step 1:").strong().color(self.theme.accent));
+                                                ui.label("Using your physical Roku remote, press the Home button.");
+                                                ui.end_row();
+
+                                                ui.label(egui::RichText::new("Step 2:").strong().color(self.theme.accent));
+                                                ui.label("Navigate to Settings > System.");
+                                                ui.end_row();
+
+                                                ui.label(egui::RichText::new("Step 3:").strong().color(self.theme.accent));
+                                                ui.label("Select Advanced system settings.");
+                                                ui.end_row();
+
+                                                ui.label(egui::RichText::new("Step 4:").strong().color(self.theme.accent));
+                                                ui.label("Select Control by mobile apps > Network access.");
+                                                ui.end_row();
+
+                                                ui.label(egui::RichText::new("Step 5:").strong().color(self.theme.accent));
+                                                ui.label("Select 'Default' or 'Permissive' (do not leave on 'Limited').");
+                                                ui.end_row();
+                                            });
+                                    });
+
+                                ui.add_space(6.0);
+
+                                // Section 2: Wi-Fi Network & Router
+                                ui.label(
+                                    egui::RichText::new("2. Wi-Fi & Subnet Setup")
+                                        .strong()
+                                        .size(13.5)
+                                        .color(self.theme.accent),
+                                );
+                                ui.label(
+                                    egui::RichText::new("• Ensure your computer and Roku are connected to the exact same Wi-Fi network.\n• Verify router does not have 'AP Isolation' / 'Client Isolation' enabled.")
+                                        .size(11.5)
+                                        .color(self.theme.foreground),
+                                );
+
+                                ui.add_space(6.0);
+
+                                // Section 3: Manual IP Entry
+                                ui.label(
+                                    egui::RichText::new("3. Find Your Roku IP Manually")
+                                        .strong()
+                                        .size(13.5)
+                                        .color(self.theme.accent),
+                                );
+                                ui.label(
+                                    egui::RichText::new("If your router blocks discovery broadcasts:\n• On Roku: Settings > Network > About > IP address.\n• In this app: Select 'Enter IP manually' in the device selector dropdown.")
+                                        .size(11.5)
+                                        .color(self.theme.foreground),
+                                );
+
+                                ui.add_space(6.0);
+
+                                // Section 4: TV Power & HDMI-CEC Control
+                                ui.label(
+                                    egui::RichText::new("4. TV Power via Roku (HDMI-CEC)")
+                                        .strong()
+                                        .size(13.5)
+                                        .color(self.theme.accent),
+                                );
+                                ui.label(
+                                    egui::RichText::new("Roku Streaming Sticks turn on the connected TV screen using HDMI-CEC:\n• On Roku: Settings > System > Control other devices (CEC) > Check '1-touch play'.\n• On your TV: Enable HDMI-CEC in your TV's settings menu (e.g. AnyNet+, Bravia Sync, SimpLink, CEC).")
+                                        .size(11.5)
+                                        .color(self.theme.foreground),
+                                );
+
+                                ui.add_space(8.0);
+                                ui.separator();
+                                ui.add_space(4.0);
+
+                                // Status Summary
+                                ui.label(
+                                    egui::RichText::new("Current Device Status:")
+                                        .strong()
+                                        .color(self.theme.accent),
+                                );
+
+                                egui::Grid::new("setup_status_grid")
+                                    .spacing([10.0, 4.0])
+                                    .show(ui, |ui| {
+                                        ui.label("Selected IP:");
+                                        ui.label(egui::RichText::new(&self.selected_device_ip).monospace());
+                                        ui.end_row();
+
+                                        ui.label("Connection:");
+                                        let (reach_label, reach_color) = if self.is_device_reachable {
+                                            ("Reachable / Online", egui::Color32::from_rgb(46, 204, 113))
+                                        } else {
+                                            ("Unreachable / Offline", egui::Color32::from_rgb(220, 60, 50))
+                                        };
+                                        ui.label(egui::RichText::new(reach_label).strong().color(reach_color));
+                                        ui.end_row();
+
+                                        ui.label("Mobile App Control:");
+                                        let mode_str = if self.device_details.ecp_setting_mode.is_empty() {
+                                            "Unknown"
+                                        } else {
+                                            &self.device_details.ecp_setting_mode
+                                        };
+                                        let mode_color = match mode_str.to_lowercase().as_str() {
+                                            "default" | "permissive" => egui::Color32::from_rgb(46, 204, 113),
+                                            "limited" | "disabled" => egui::Color32::from_rgb(240, 160, 40),
+                                            _ => self.theme.foreground,
+                                        };
+                                        ui.label(egui::RichText::new(mode_str).strong().color(mode_color));
+                                        ui.end_row();
+                                    });
+                            });
+
+                        ui.add_space(8.0);
+                        ui.separator();
+
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.button("🔍 Scan Network").clicked() {
+                                self.is_scanning = true;
+                                self.status_text = "Scanning network...".into();
+                                self.start_discovery_scan();
+                            }
+                            if ui.button("🔄 Re-test Connection").clicked() {
+                                self.refresh_device_info();
+                            }
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.button("Close").clicked() {
+                                    self.show_setup_guide = false;
+                                }
+                            });
+                        });
+                    });
+            }
         }
 
         let panel_frame = egui::Frame::none()
@@ -1645,11 +2147,19 @@ impl eframe::App for RokuRemoteApp {
                             do_toggle_power = true;
                         }
 
-                        if ui.add(egui::Button::new("⚙ Setup")).clicked() {
+                        if ui.add(egui::Button::new("⚙ Setup").selected(self.show_setup_guide)).clicked() {
                             self.show_setup_guide = !self.show_setup_guide;
+                            if self.show_setup_guide {
+                                self.show_device_info = false;
+                                self.show_shortcuts = false;
+                            }
                         }
-                        if ui.add(egui::Button::new("Device Info")).clicked() {
+                        if ui.add(egui::Button::new("Device Info").selected(self.show_device_info)).clicked() {
                             self.show_device_info = !self.show_device_info;
+                            if self.show_device_info {
+                                self.show_setup_guide = false;
+                                self.show_shortcuts = false;
+                            }
                         }
                     });
                 });
@@ -1890,18 +2400,42 @@ impl eframe::App for RokuRemoteApp {
 
                         // In right_to_left, items are placed rightmost first: [⚙], then [ℹ], then [🔄]
                         if total_width >= 460.0 {
-                            if ui.button("⚙ Setup").clicked() {
-                                self.show_setup_guide = !self.show_setup_guide;
+                            if ui.add(egui::Button::new("⚙ Setup").selected(self.show_setup_guide)).clicked() {
+                                if self.show_setup_guide {
+                                    self.show_setup_guide = false;
+                                } else {
+                                    self.show_setup_guide = true;
+                                    self.show_device_info = false;
+                                    self.show_shortcuts = false;
+                                }
                             }
-                            if ui.button("ℹ Device Info").clicked() {
-                                self.show_device_info = !self.show_device_info;
+                            if ui.add(egui::Button::new("ℹ Device Info").selected(self.show_device_info)).clicked() {
+                                if self.show_device_info {
+                                    self.show_device_info = false;
+                                } else {
+                                    self.show_device_info = true;
+                                    self.show_setup_guide = false;
+                                    self.show_shortcuts = false;
+                                }
                             }
                         } else {
-                            if ui.add_sized(btn_size, egui::Button::new("⚙")).on_hover_text("Setup & Troubleshooting Guide").clicked() {
-                                self.show_setup_guide = !self.show_setup_guide;
+                            if ui.add_sized(btn_size, egui::Button::new("⚙").selected(self.show_setup_guide)).on_hover_text("Setup & Troubleshooting Guide").clicked() {
+                                if self.show_setup_guide {
+                                    self.show_setup_guide = false;
+                                } else {
+                                    self.show_setup_guide = true;
+                                    self.show_device_info = false;
+                                    self.show_shortcuts = false;
+                                }
                             }
-                            if ui.add_sized(btn_size, egui::Button::new("ℹ")).on_hover_text("Roku Device Details").clicked() {
-                                self.show_device_info = !self.show_device_info;
+                            if ui.add_sized(btn_size, egui::Button::new("ℹ").selected(self.show_device_info)).on_hover_text("Roku Device Details").clicked() {
+                                if self.show_device_info {
+                                    self.show_device_info = false;
+                                } else {
+                                    self.show_device_info = true;
+                                    self.show_setup_guide = false;
+                                    self.show_shortcuts = false;
+                                }
                             }
                         }
 
@@ -1974,36 +2508,43 @@ impl eframe::App for RokuRemoteApp {
                 self.manual_ip_mode = true;
             }
 
-            // Banner for Limited / Unreachable Mode
+            // Banner for Limited / Unreachable Mode (only shown on home remote screen, not when a sub-view is already open)
             let is_limited = self.is_device_reachable
                 && (self.device_details.ecp_setting_mode.eq_ignore_ascii_case("limited")
                     || self.device_details.ecp_setting_mode.eq_ignore_ascii_case("disabled"));
+            let is_dialog_open_narrow = !is_wide && (self.show_device_info || self.show_setup_guide || self.show_shortcuts);
 
-            if is_limited {
-                ui.add_space(2.0);
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(
-                        egui::RichText::new("\u{26A0} Roku Mobile App Control is 'Limited'.")
-                            .color(egui::Color32::from_rgb(240, 160, 40))
-                            .size(11.5)
-                            .strong(),
-                    );
-                    if ui.button(egui::RichText::new("⚙ Setup").color(egui::Color32::from_rgb(240, 160, 40))).clicked() {
-                        self.show_setup_guide = true;
-                    }
-                });
-            } else if !self.is_device_reachable && !self.is_scanning && !self.selected_device_ip.is_empty() {
-                ui.add_space(2.0);
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(
-                        egui::RichText::new(format!("\u{26A0} Roku unreachable at {}.", self.selected_device_ip))
-                            .color(egui::Color32::from_rgb(220, 80, 70))
-                            .size(11.5),
-                    );
-                    if ui.button("⚙ Setup Guide").clicked() {
-                        self.show_setup_guide = true;
-                    }
-                });
+            if !is_dialog_open_narrow {
+                if is_limited {
+                    ui.add_space(2.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(
+                            egui::RichText::new("\u{26A0} Roku Mobile App Control is 'Limited'.")
+                                .color(egui::Color32::from_rgb(240, 160, 40))
+                                .size(11.5)
+                                .strong(),
+                        );
+                        if ui.button(egui::RichText::new("⚙ Setup").color(egui::Color32::from_rgb(240, 160, 40))).clicked() {
+                            self.show_setup_guide = true;
+                            self.show_device_info = false;
+                            self.show_shortcuts = false;
+                        }
+                    });
+                } else if !self.is_device_reachable && !self.is_scanning && !self.selected_device_ip.is_empty() {
+                    ui.add_space(2.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(
+                            egui::RichText::new(format!("\u{26A0} Roku unreachable at {}.", self.selected_device_ip))
+                                .color(egui::Color32::from_rgb(220, 80, 70))
+                                .size(11.5),
+                        );
+                        if ui.button("⚙ Setup Guide").clicked() {
+                            self.show_setup_guide = true;
+                            self.show_device_info = false;
+                            self.show_shortcuts = false;
+                        }
+                    });
+                }
             }
 
             ui.add_space(4.0);
@@ -2052,16 +2593,24 @@ impl eframe::App for RokuRemoteApp {
                             ui.vertical(|ui| {
                                 ui.set_width(content_width);
 
-                                // Controls section
-                                self.render_controls_section(ui, content_width);
+                                if self.show_device_info {
+                                    self.render_device_info_narrow(ui, content_width);
+                                } else if self.show_setup_guide {
+                                    self.render_setup_guide_narrow(ui, content_width);
+                                } else if self.show_shortcuts {
+                                    self.render_shortcuts_narrow(ui, content_width);
+                                } else {
+                                    // Controls section
+                                    self.render_controls_section(ui, content_width);
 
-                                ui.add_space(10.0);
-                                ui.separator();
-                                ui.add_space(8.0);
+                                    ui.add_space(10.0);
+                                    ui.separator();
+                                    ui.add_space(8.0);
 
-                                // Applications Section
-                                self.render_apps_section(ui, false);
-                                ui.add_space(20.0);
+                                    // Applications Section
+                                    self.render_apps_section(ui, false);
+                                    ui.add_space(20.0);
+                                }
                             });
                         });
                     });
