@@ -1437,7 +1437,6 @@ impl RokuRemoteApp {
                 // Toggle Always on Top OFF -> Return to normal window level
                 self.is_always_on_top = false;
                 ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::Normal));
-                self.status_text = "Always on Top: OFF".into();
             } else {
                 // Toggle Always on Top ON -> Bring down to minimum size (320x680) and set Always on Top
                 self.pending_restore_to_min = 3;
@@ -1446,7 +1445,6 @@ impl RokuRemoteApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
                 ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
                 ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(320.0, 680.0)));
-                self.status_text = "Always on Top: ON".into();
             }
             return;
         }
@@ -2348,11 +2346,20 @@ impl eframe::App for RokuRemoteApp {
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(4.0);
-                        ui.label(
-                            egui::RichText::new(&self.status_text)
-                                .color(self.theme.dark_foreground)
-                                .size(11.0),
-                        );
+                        if self.is_always_on_top {
+                            ui.label(
+                                egui::RichText::new("📌 Always on Top")
+                                    .color(self.theme.accent)
+                                    .size(11.0)
+                                    .strong(),
+                            );
+                        } else {
+                            ui.label(
+                                egui::RichText::new(&self.status_text)
+                                    .color(self.theme.dark_foreground)
+                                    .size(11.0),
+                            );
+                        }
                     });
                 });
             } else {
@@ -2577,14 +2584,23 @@ impl eframe::App for RokuRemoteApp {
                         }
                     }
 
-                    if !has_active || total_width >= 350.0 {
+                    if self.is_always_on_top || !has_active || total_width >= 350.0 {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.add_space(4.0);
-                            ui.label(
-                                egui::RichText::new(&self.status_text)
-                                    .color(self.theme.dark_foreground)
-                                    .size(10.5),
-                            );
+                            if self.is_always_on_top {
+                                ui.label(
+                                    egui::RichText::new("📌 Always on Top")
+                                        .color(self.theme.accent)
+                                        .size(10.5)
+                                        .strong(),
+                                );
+                            } else {
+                                ui.label(
+                                    egui::RichText::new(&self.status_text)
+                                        .color(self.theme.dark_foreground)
+                                        .size(10.5),
+                                );
+                            }
                         });
                     }
                 });
