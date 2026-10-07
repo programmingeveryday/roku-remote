@@ -624,7 +624,7 @@ impl RokuRemoteApp {
                     self.replay();
                 }
                 ui.add_space(spacing);
-                if ui.add_sized(btn_nav, egui::Button::new("Info (*)")).clicked() {
+                if ui.add_sized(btn_nav, egui::Button::new("Options (*)")).on_hover_text("Roku Options / Asterisk menu (O)").clicked() {
                     self.send_key("Info");
                 }
             });
@@ -1346,8 +1346,9 @@ impl RokuRemoteApp {
                             ("🏠", "H", "Home"),
                             ("▶⏸", "P", "Play / Pause"),
                             ("↺", "R", "Instant Replay"),
-                            ("✱", "I", "Info / Options (*)"),
+                            ("✱", "O / *", "Options (*) menu on Roku"),
                             ("🔇", "M", "Mute"),
+                            ("ℹ", "I", "Toggle Device Info dialog"),
                             ("⚙", "S", "Toggle Setup & Troubleshooting Guide"),
                             ("🖥", "Ctrl + M", "Toggle window size (Min / Full Screen)"),
                             ("🔄", "Ctrl + Shift + R", "Refresh Quick Launch Apps"),
@@ -1391,6 +1392,7 @@ impl RokuRemoteApp {
             key_h,
             key_r,
             key_i,
+            key_o,
             key_m,
             key_p,
             key_a,
@@ -1411,6 +1413,7 @@ impl RokuRemoteApp {
                 i.key_pressed(egui::Key::H),
                 i.key_pressed(egui::Key::R),
                 i.key_pressed(egui::Key::I),
+                i.key_pressed(egui::Key::O) || (i.modifiers.shift && i.key_pressed(egui::Key::Num8)),
                 i.key_pressed(egui::Key::M),
                 i.key_pressed(egui::Key::P),
                 i.key_pressed(egui::Key::A),
@@ -1448,6 +1451,16 @@ impl RokuRemoteApp {
             self.show_setup_guide = !self.show_setup_guide;
             if self.show_setup_guide {
                 self.show_device_info = false;
+                self.show_shortcuts = false;
+            }
+            return;
+        }
+
+        // I -> Toggle Device Info dialog box
+        if !ctrl && key_i {
+            self.show_device_info = !self.show_device_info;
+            if self.show_device_info {
+                self.show_setup_guide = false;
                 self.show_shortcuts = false;
             }
             return;
@@ -1499,8 +1512,8 @@ impl RokuRemoteApp {
                 self.send_key("Home"); // Home Button
             } else if key_r {
                 self.replay(); // Replay Button (5x Rev + Play)
-            } else if key_i {
-                self.send_key("Info"); // Info / Options Button
+            } else if key_o {
+                self.send_key("Info"); // Options / Asterisk (*) button on Roku
             } else if key_p {
                 self.send_key("Play"); // Play / Pause
             } else if key_m {
@@ -1700,13 +1713,18 @@ impl eframe::App for RokuRemoteApp {
                                 ui.end_row();
 
                                 ui.label("✱");
-                                ui.label(egui::RichText::new("I").strong().color(self.theme.accent));
-                                ui.label(egui::RichText::new("Info / Options (*)").color(self.theme.foreground));
+                                ui.label(egui::RichText::new("O / *").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("Options (*) menu on Roku").color(self.theme.foreground));
                                 ui.end_row();
 
                                 ui.label("🔇");
                                 ui.label(egui::RichText::new("M").strong().color(self.theme.accent));
                                 ui.label(egui::RichText::new("Mute").color(self.theme.foreground));
+                                ui.end_row();
+
+                                ui.label("ℹ");
+                                ui.label(egui::RichText::new("I").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("Toggle Device Info dialog").color(self.theme.foreground));
                                 ui.end_row();
 
                                 ui.label("⚙");
@@ -2195,7 +2213,7 @@ impl eframe::App for RokuRemoteApp {
                                 self.show_shortcuts = false;
                             }
                         }
-                        if ui.add(egui::Button::new("Device Info").selected(self.show_device_info)).clicked() {
+                        if ui.add(egui::Button::new("ℹ Device Info").selected(self.show_device_info)).on_hover_text("Roku Device Details (I)").clicked() {
                             self.show_device_info = !self.show_device_info;
                             if self.show_device_info {
                                 self.show_setup_guide = false;
@@ -2450,7 +2468,7 @@ impl eframe::App for RokuRemoteApp {
                                     self.show_shortcuts = false;
                                 }
                             }
-                            if ui.add(egui::Button::new("ℹ Device Info").selected(self.show_device_info)).clicked() {
+                            if ui.add(egui::Button::new("ℹ Device Info").selected(self.show_device_info)).on_hover_text("Roku Device Details (I)").clicked() {
                                 if self.show_device_info {
                                     self.show_device_info = false;
                                 } else {
@@ -2469,7 +2487,7 @@ impl eframe::App for RokuRemoteApp {
                                     self.show_shortcuts = false;
                                 }
                             }
-                            if ui.add_sized(btn_size, egui::Button::new("ℹ").selected(self.show_device_info)).on_hover_text("Roku Device Details").clicked() {
+                            if ui.add_sized(btn_size, egui::Button::new("ℹ").selected(self.show_device_info)).on_hover_text("Roku Device Details (I)").clicked() {
                                 if self.show_device_info {
                                     self.show_device_info = false;
                                 } else {

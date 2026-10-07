@@ -79,9 +79,10 @@ Roku Remote dynamically detects window width and automatically reflows its user 
 | **H** | Home | Return to Roku Home screen |
 | **P** | Play / Pause | Toggle media playback |
 | **R** | Replay | Instant replay (jumps back ~10s) |
-| **I** | Info / Options | Options / Asterisk (`*`) menu |
+| **O** / **\*** | Options / Star | Roku Options / Asterisk (`*`) menu |
 | **Ctrl + Up / Down** | Volume | Volume Up / Volume Down |
 | **M** | Mute | Toggle audio mute |
+| **I** | Device Info | Toggle Roku Device Details / Info dialog |
 | **S** | Setup Guide | Toggle Setup & Troubleshooting Guide |
 | **Ctrl + M** | Window Size | Toggle window size (Min / Full Screen) |
 | **Ctrl + Shift + R** or **Ctrl + A** | Refresh Apps | Check and reload installed apps & icons |
