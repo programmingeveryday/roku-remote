@@ -698,7 +698,7 @@ impl RokuRemoteApp {
         });
     }
 
-    pub fn render_apps_section(&mut self, ui: &mut egui::Ui, is_wide_layout: bool) {
+    pub fn render_apps_section(&mut self, ui: &mut egui::Ui, is_wide_layout: bool) -> Option<f32> {
         let mut do_refresh_apps = false;
         let is_compact = ui.available_width() < 360.0;
         ui.horizontal(|ui| {
@@ -744,6 +744,7 @@ impl RokuRemoteApp {
             self.refresh_apps();
         }
         ui.add_space(6.0);
+        let buttons_top_y = ui.cursor().top();
 
         if self.apps.is_empty() {
             ui.add_space(24.0);
@@ -776,7 +777,7 @@ impl RokuRemoteApp {
                     }
                 }
             });
-            return;
+            return Some(buttons_top_y);
         }
 
         let mut app_to_launch = None;
@@ -881,6 +882,8 @@ impl RokuRemoteApp {
         if let Some(id) = app_to_launch {
             self.launch_app(id);
         }
+
+        Some(buttons_top_y)
     }
 
     pub fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
@@ -2000,19 +2003,17 @@ impl eframe::App for RokuRemoteApp {
                 // WIDE SCREEN: Controls Left (300px), Apps Grid Right
                 let controls_width = 300.0f32;
                 ui.horizontal_top(|ui| {
+                    let section_top_y = ui.cursor().top();
+                    let offset_id = egui::Id::new("roku_app_buttons_top_offset");
+
                     ui.vertical(|ui| {
                         ui.set_width(controls_width);
 
-                        let controls_id = ui.id().with("wide_controls_height");
-                        let prev_height: f32 = ui.ctx().data_mut(|d| d.get_temp(controls_id)).unwrap_or(330.0);
-                        let avail_h = ui.available_height();
-                        let top_padding = ((avail_h - prev_height) / 2.0).max(0.0);
+                        // Align remote controls with where the app buttons begin on the right
+                        let top_padding: f32 = ui.ctx().data_mut(|d| d.get_temp(offset_id)).unwrap_or(34.0);
                         ui.add_space(top_padding);
 
-                        let response = ui.scope(|ui| {
-                            self.render_controls_section(ui, controls_width);
-                        }).response;
-                        ui.ctx().data_mut(|d| d.insert_temp(controls_id, response.rect.height()));
+                        self.render_controls_section(ui, controls_width);
                     });
 
                     ui.add_space(10.0);
@@ -2020,7 +2021,11 @@ impl eframe::App for RokuRemoteApp {
                     ui.add_space(10.0);
 
                     ui.vertical(|ui| {
-                        self.render_apps_section(ui, true);
+                        let apps_buttons_top_y = self.render_apps_section(ui, true);
+                        if let Some(buttons_y) = apps_buttons_top_y {
+                            let measured_offset = (buttons_y - section_top_y).max(0.0);
+                            ui.ctx().data_mut(|d| d.insert_temp(offset_id, measured_offset));
+                        }
                     });
                 });
             } else {
