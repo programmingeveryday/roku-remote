@@ -40,6 +40,7 @@ pub struct RokuRemoteApp {
     pub status_text: String,
     pub show_shortcuts: bool,
     pub pending_restore_to_min: u8,
+    pub is_always_on_top: bool,
     pub theme: ThemeColors,
     pub ctx: egui::Context,
     pub rx: Receiver<BackgroundMessage>,
@@ -93,6 +94,7 @@ impl RokuRemoteApp {
             status_text: "Discovering Rokus...".to_string(),
             show_shortcuts: false,
             pending_restore_to_min: 0,
+            is_always_on_top: false,
             theme,
             ctx: cc.egui_ctx.clone(),
             rx,
@@ -1350,7 +1352,7 @@ impl RokuRemoteApp {
                             ("🔇", "M", "Mute"),
                             ("ℹ", "I", "Toggle Device Info dialog"),
                             ("⚙", "S", "Toggle Setup & Troubleshooting Guide"),
-                            ("🖥", "Ctrl + M", "Toggle window size (Min / Full Screen)"),
+                            ("🖥", "Ctrl + Shift + M", "Toggle compact Always-on-Top / Maximized Normal"),
                             ("🔄", "Ctrl + Shift + R", "Refresh Quick Launch Apps"),
                             ("💡", "Ctrl + ,", "Toggle shortcuts guide"),
                         ];
@@ -1428,20 +1430,25 @@ impl RokuRemoteApp {
             return;
         }
 
-        // Ctrl + M -> Toggle window size between minimum size (320x680) and maximum full screen (maximized)
+        // Ctrl + Shift + M (or Ctrl + M) -> Toggle between minimized compact remote (320x680, Always on Top) and maximized (Normal)
         if ctrl && key_m {
             let is_maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false))
                 || ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-            let current_w = ctx.screen_rect().width();
 
-            if is_maximized || current_w >= 680.0 {
+            if self.is_always_on_top && !is_maximized {
+                // Maximize to full screen and reset window level to normal
+                self.pending_restore_to_min = 0;
+                self.is_always_on_top = false;
+                ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::Normal));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+            } else {
+                // Minimize to compact size (320x680) and set to Always on Top
                 self.pending_restore_to_min = 3;
+                self.is_always_on_top = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
                 ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(320.0, 680.0)));
-            } else {
-                self.pending_restore_to_min = 0;
-                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
             }
             return;
         }
@@ -1590,6 +1597,9 @@ impl eframe::App for RokuRemoteApp {
         if self.pending_restore_to_min > 0 {
             self.pending_restore_to_min -= 1;
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(320.0, 680.0)));
+            if self.is_always_on_top {
+                ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
+            }
             if self.pending_restore_to_min > 0 {
                 ctx.request_repaint();
             }
@@ -1733,8 +1743,8 @@ impl eframe::App for RokuRemoteApp {
                                 ui.end_row();
 
                                 ui.label("🖥");
-                                ui.label(egui::RichText::new("Ctrl + M").strong().color(self.theme.accent));
-                                ui.label(egui::RichText::new("Toggle window size (Min / Full Screen)").color(self.theme.foreground));
+                                ui.label(egui::RichText::new("Ctrl + Shift + M").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("Toggle compact Always-on-Top / Maximized Normal").color(self.theme.foreground));
                                 ui.end_row();
 
                                 ui.label("🔄");
