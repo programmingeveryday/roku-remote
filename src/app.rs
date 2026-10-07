@@ -1352,7 +1352,7 @@ impl RokuRemoteApp {
                             ("🔇", "M", "Mute"),
                             ("ℹ", "I", "Toggle Device Info dialog"),
                             ("⚙", "S", "Toggle Setup & Troubleshooting Guide"),
-                            ("🖥", "Ctrl + Shift + M", "Toggle compact Always-on-Top / Maximized Normal"),
+                            ("📌", "Ctrl + Shift + M", "Toggle Always-on-Top (compact size)"),
                             ("🔄", "Ctrl + Shift + R", "Refresh Quick Launch Apps"),
                             ("💡", "Ctrl + ,", "Toggle shortcuts guide"),
                         ];
@@ -1430,25 +1430,22 @@ impl RokuRemoteApp {
             return;
         }
 
-        // Ctrl + Shift + M (or Ctrl + M) -> Toggle between minimized compact remote (320x680, Always on Top) and maximized (Normal)
+        // Ctrl + Shift + M (or Ctrl + M) -> Toggle Always on Top (brings to minimum size 320x680 and toggles on/off)
         if ctrl && key_m {
-            let is_maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false))
-                || ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-
-            if self.is_always_on_top && !is_maximized {
-                // Maximize to full screen and reset window level to normal
-                self.pending_restore_to_min = 0;
+            if self.is_always_on_top {
+                // Toggle Always on Top OFF -> Return to normal window level
                 self.is_always_on_top = false;
                 ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::Normal));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                self.status_text = "Always on Top: OFF".into();
             } else {
-                // Minimize to compact size (320x680) and set to Always on Top
+                // Toggle Always on Top ON -> Bring down to minimum size (320x680) and set Always on Top
                 self.pending_restore_to_min = 3;
                 self.is_always_on_top = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
                 ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
                 ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(320.0, 680.0)));
+                self.status_text = "Always on Top: ON".into();
             }
             return;
         }
@@ -1742,9 +1739,9 @@ impl eframe::App for RokuRemoteApp {
                                 ui.label(egui::RichText::new("Toggle Setup & Troubleshooting Guide").color(self.theme.foreground));
                                 ui.end_row();
 
-                                ui.label("🖥");
+                                ui.label("📌");
                                 ui.label(egui::RichText::new("Ctrl + Shift + M").strong().color(self.theme.accent));
-                                ui.label(egui::RichText::new("Toggle compact Always-on-Top / Maximized Normal").color(self.theme.foreground));
+                                ui.label(egui::RichText::new("Toggle Always-on-Top (compact size)").color(self.theme.foreground));
                                 ui.end_row();
 
                                 ui.label("🔄");
