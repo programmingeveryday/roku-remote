@@ -1790,13 +1790,12 @@ impl eframe::App for RokuRemoteApp {
 
                 ui.add_space(3.0);
 
-                // Row 2: Device Selector (Left) + Integrated Quick Action Toolbar [🔄, ℹ, ⚙] (Right)
+                // Row 2: Device Selector on Left, Action Toolbar on Right, Space in Between
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
                     if self.manual_ip_mode {
                         let text_edit = ui.add(
                             egui::TextEdit::singleline(&mut self.selected_device_ip)
-                                .desired_width((ui.available_width() - 110.0).max(80.0))
+                                .desired_width(105.0)
                                 .hint_text("192.168.x.x"),
                         );
                         if text_edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -1836,11 +1835,11 @@ impl eframe::App for RokuRemoteApp {
                         };
 
                         let combo_w = if total_width >= 460.0 {
-                            180.0
+                            175.0
                         } else if is_very_narrow {
-                            136.0
+                            132.0
                         } else {
-                            148.0
+                            145.0
                         };
 
                         egui::ComboBox::from_id_salt("roku_device_combo_narrow")
@@ -1868,31 +1867,36 @@ impl eframe::App for RokuRemoteApp {
                                     switch_to_manual = true;
                                 }
                             });
+                    }
 
-                        // Action toolbar buttons with explicit sizing & tight spacing
+                    // Right side: Action toolbar buttons anchored to right edge
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(4.0);
                         let btn_size = egui::vec2(24.0, 24.0);
+
+                        // In right_to_left, items are placed rightmost first: [⚙], then [ℹ], then [🔄]
+                        if total_width >= 460.0 {
+                            if ui.button("⚙ Setup").clicked() {
+                                self.show_setup_guide = !self.show_setup_guide;
+                            }
+                            if ui.button("ℹ Device Info").clicked() {
+                                self.show_device_info = !self.show_device_info;
+                            }
+                        } else {
+                            if ui.add_sized(btn_size, egui::Button::new("⚙")).on_hover_text("Setup & Troubleshooting Guide").clicked() {
+                                self.show_setup_guide = !self.show_setup_guide;
+                            }
+                            if ui.add_sized(btn_size, egui::Button::new("ℹ")).on_hover_text("Roku Device Details").clicked() {
+                                self.show_device_info = !self.show_device_info;
+                            }
+                        }
+
                         if self.is_scanning || self.is_refreshing_apps {
                             ui.add_sized(btn_size, egui::Spinner::new());
                         } else if ui.add_sized(btn_size, egui::Button::new("🔄")).on_hover_text("Refresh device info & scan network").clicked() {
                             do_refresh_all = true;
                         }
-
-                        if total_width >= 460.0 {
-                            if ui.button("ℹ Device Info").clicked() {
-                                self.show_device_info = !self.show_device_info;
-                            }
-                            if ui.button("⚙ Setup").clicked() {
-                                self.show_setup_guide = !self.show_setup_guide;
-                            }
-                        } else {
-                            if ui.add_sized(btn_size, egui::Button::new("ℹ")).on_hover_text("Roku Device Details").clicked() {
-                                self.show_device_info = !self.show_device_info;
-                            }
-                            if ui.add_sized(btn_size, egui::Button::new("⚙")).on_hover_text("Setup & Troubleshooting Guide").clicked() {
-                                self.show_setup_guide = !self.show_setup_guide;
-                            }
-                        }
-                    }
+                    });
                 });
 
                 ui.add_space(2.0);

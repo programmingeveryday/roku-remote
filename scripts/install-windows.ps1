@@ -33,6 +33,10 @@ if (-not (Test-Path $InstallDir)) {
 }
 
 $BinTarget = Join-Path $InstallDir "roku-remote-rs.exe"
+# Stop running instance if open so file can be overwritten
+Get-Process -Name "roku-remote-rs" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 200
+
 Write-Host "Installing executable to $BinTarget..." -ForegroundColor Yellow
 Copy-Item -Path $BinSource -Destination $BinTarget -Force
 
