@@ -1600,11 +1600,6 @@ impl eframe::App for RokuRemoteApp {
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(4.0);
-                        if self.is_scanning {
-                            ui.spinner();
-                        } else if ui.add(egui::Button::new("Scan")).clicked() {
-                            do_refresh_all = true;
-                        }
 
                         // Power button
                         let (power_label, power_bg, hover_bg) = if is_powered_on {
