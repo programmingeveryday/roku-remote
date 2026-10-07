@@ -2002,7 +2002,17 @@ impl eframe::App for RokuRemoteApp {
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
                         ui.set_width(controls_width);
-                        self.render_controls_section(ui, controls_width);
+
+                        let controls_id = ui.id().with("wide_controls_height");
+                        let prev_height: f32 = ui.ctx().data_mut(|d| d.get_temp(controls_id)).unwrap_or(330.0);
+                        let avail_h = ui.available_height();
+                        let top_padding = ((avail_h - prev_height) / 2.0).max(0.0);
+                        ui.add_space(top_padding);
+
+                        let response = ui.scope(|ui| {
+                            self.render_controls_section(ui, controls_width);
+                        }).response;
+                        ui.ctx().data_mut(|d| d.insert_temp(controls_id, response.rect.height()));
                     });
 
                     ui.add_space(10.0);
