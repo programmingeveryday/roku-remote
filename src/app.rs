@@ -1368,15 +1368,7 @@ impl RokuRemoteApp {
                     });
             });
 
-        ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            if ui.button("Close").clicked() {
-                self.show_shortcuts = false;
-            }
-        });
-        ui.add_space(16.0);
+        ui.add_space(12.0);
     }
 
     pub fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
