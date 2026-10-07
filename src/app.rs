@@ -784,15 +784,25 @@ impl RokuRemoteApp {
 
         let render_grid = |ui: &mut egui::Ui, app_to_launch: &mut Option<String>| {
             let avail_w = ui.available_width() - 8.0;
-            let (min_card_w, aspect_ratio, min_h, max_h) = if is_wide_layout {
-                (138.0, 0.75, 100.0, 122.0)
+            let spacing = 8.0f32;
+            let (btn_w, btn_h, cols) = if is_wide_layout {
+                // Wide view: 138px is the largest card size desired.
+                // As the view becomes narrower, gracefully accommodate by scaling down towards ~100px.
+                let max_card_w = 138.0f32;
+                let aspect_ratio = 0.75f32;
+                let cols = ((avail_w + spacing) / (max_card_w + spacing)).ceil().max(2.0) as usize;
+                let btn_w = ((avail_w - (spacing * (cols as f32 - 1.0))) / (cols as f32)).clamp(85.0, max_card_w);
+                let btn_h = (btn_w * aspect_ratio).clamp(76.0, 104.0);
+                (btn_w, btn_h, cols)
             } else {
-                (96.0, 0.92, 88.0, 102.0)
+                // Narrow view: keep existing sizing untouched
+                let min_card_w = 96.0f32;
+                let aspect_ratio = 0.92f32;
+                let cols = ((avail_w / min_card_w).floor() as usize).max(2);
+                let btn_w = ((avail_w - (spacing * (cols as f32 - 1.0))) / (cols as f32)).max(85.0);
+                let btn_h = (btn_w * aspect_ratio).clamp(88.0, 102.0);
+                (btn_w, btn_h, cols)
             };
-            let cols = ((avail_w / min_card_w).floor() as usize).max(2);
-            let spacing = if is_wide_layout { 8.0 } else { 8.0 };
-            let btn_w = ((avail_w - (spacing * (cols as f32 - 1.0))) / (cols as f32)).max(85.0);
-            let btn_h = (btn_w * aspect_ratio).clamp(min_h, max_h);
 
             egui::Grid::new("apps_grid")
                 .spacing([spacing, spacing])
@@ -842,9 +852,10 @@ impl RokuRemoteApp {
                         } else {
                             // Fallback when no icon is found: show TV icon + app name
                             child_ui.vertical_centered(|ui| {
-                                let icon_size = if is_wide_layout { 30.0 } else { 26.0 };
-                                let font_size = if is_wide_layout { 11.5 } else { 11.0 };
-                                ui.add_space(8.0);
+                                let icon_size = if is_wide_layout { (btn_h * 0.28).clamp(22.0, 30.0) } else { 26.0 };
+                                let font_size = if is_wide_layout { (btn_h * 0.11).clamp(10.0, 11.5) } else { 11.0 };
+                                let top_pad = if is_wide_layout { (btn_h * 0.06).clamp(3.0, 8.0) } else { 8.0 };
+                                ui.add_space(top_pad);
                                 ui.label(
                                     egui::RichText::new("📺")
                                         .size(icon_size),
