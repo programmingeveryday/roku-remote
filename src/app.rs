@@ -39,6 +39,7 @@ pub struct RokuRemoteApp {
     pub is_refreshing_apps: bool,
     pub status_text: String,
     pub show_shortcuts: bool,
+    pub pending_restore_to_min: u8,
     pub theme: ThemeColors,
     pub ctx: egui::Context,
     pub rx: Receiver<BackgroundMessage>,
@@ -91,6 +92,7 @@ impl RokuRemoteApp {
             is_refreshing_apps: true,
             status_text: "Discovering Rokus...".to_string(),
             show_shortcuts: false,
+            pending_restore_to_min: 0,
             theme,
             ctx: cc.egui_ctx.clone(),
             rx,
@@ -1345,7 +1347,8 @@ impl RokuRemoteApp {
                             ("▶⏸", "P", "Play / Pause"),
                             ("↺", "R", "Instant Replay"),
                             ("✱", "I", "Info / Options (*)"),
-                            ("🔇", "Ctrl + M", "Mute"),
+                            ("🔇", "M", "Mute"),
+                            ("🖥", "Ctrl + M", "Toggle window size (Min / Full Screen)"),
                             ("🔄", "Ctrl + Shift + R", "Refresh Quick Launch Apps"),
                             ("💡", "Ctrl + ,", "Toggle shortcuts guide"),
                         ];
@@ -1423,6 +1426,24 @@ impl RokuRemoteApp {
             return;
         }
 
+        // Ctrl + M -> Toggle window size between minimum size (320x680) and maximum full screen (maximized)
+        if ctrl && key_m {
+            let is_maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false))
+                || ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+            let current_w = ctx.screen_rect().width();
+
+            if is_maximized || current_w >= 680.0 {
+                self.pending_restore_to_min = 3;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(320.0, 680.0)));
+            } else {
+                self.pending_restore_to_min = 0;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+            }
+            return;
+        }
+
         // Escape closes any open modal dialog
         if key_escape && (self.show_shortcuts || self.show_device_info || self.show_setup_guide) {
             self.show_shortcuts = false;
@@ -1443,8 +1464,6 @@ impl RokuRemoteApp {
                 self.send_key("VolumeUp"); // Volume Up
             } else if key_down {
                 self.send_key("VolumeDown"); // Volume Down
-            } else if key_m {
-                self.send_key("VolumeMute"); // Mute
             } else if key_p {
                 self.send_key("Play"); // Play/Pause
             }
@@ -1470,6 +1489,8 @@ impl RokuRemoteApp {
                 self.send_key("Info"); // Info / Options Button
             } else if key_p {
                 self.send_key("Play"); // Play / Pause
+            } else if key_m {
+                self.send_key("VolumeMute"); // Mute
             }
         }
     }
@@ -1539,6 +1560,14 @@ fn draw_power_icon(
 
 impl eframe::App for RokuRemoteApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.pending_restore_to_min > 0 {
+            self.pending_restore_to_min -= 1;
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(320.0, 680.0)));
+            if self.pending_restore_to_min > 0 {
+                ctx.request_repaint();
+            }
+        }
+
         let window_rect = ctx.screen_rect();
         let has_user_input = ctx.input(|i| {
             i.raw.events.iter().any(|e| match e {
@@ -1662,8 +1691,13 @@ impl eframe::App for RokuRemoteApp {
                                 ui.end_row();
 
                                 ui.label("🔇");
-                                ui.label(egui::RichText::new("Ctrl + M").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("M").strong().color(self.theme.accent));
                                 ui.label(egui::RichText::new("Mute").color(self.theme.foreground));
+                                ui.end_row();
+
+                                ui.label("🖥");
+                                ui.label(egui::RichText::new("Ctrl + M").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("Toggle window size (Min / Full Screen)").color(self.theme.foreground));
                                 ui.end_row();
 
                                 ui.label("🔄");
