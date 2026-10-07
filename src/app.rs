@@ -1348,6 +1348,7 @@ impl RokuRemoteApp {
                             ("↺", "R", "Instant Replay"),
                             ("✱", "I", "Info / Options (*)"),
                             ("🔇", "M", "Mute"),
+                            ("⚙", "S", "Toggle Setup & Troubleshooting Guide"),
                             ("🖥", "Ctrl + M", "Toggle window size (Min / Full Screen)"),
                             ("🔄", "Ctrl + Shift + R", "Refresh Quick Launch Apps"),
                             ("💡", "Ctrl + ,", "Toggle shortcuts guide"),
@@ -1372,6 +1373,10 @@ impl RokuRemoteApp {
     }
 
     pub fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
+        if ctx.wants_keyboard_input() {
+            return;
+        }
+
         let (
             ctrl,
             shift,
@@ -1389,6 +1394,7 @@ impl RokuRemoteApp {
             key_m,
             key_p,
             key_a,
+            key_s,
             key_comma,
         ) = ctx.input(|i| {
             (
@@ -1408,6 +1414,7 @@ impl RokuRemoteApp {
                 i.key_pressed(egui::Key::M),
                 i.key_pressed(egui::Key::P),
                 i.key_pressed(egui::Key::A),
+                i.key_pressed(egui::Key::S),
                 i.key_pressed(egui::Key::Comma),
             )
         });
@@ -1436,11 +1443,26 @@ impl RokuRemoteApp {
             return;
         }
 
+        // S -> Toggle Setup & Troubleshooting Guide
+        if !ctrl && key_s {
+            self.show_setup_guide = !self.show_setup_guide;
+            if self.show_setup_guide {
+                self.show_device_info = false;
+                self.show_shortcuts = false;
+            }
+            return;
+        }
+
         // Escape closes any open modal dialog
         if key_escape && (self.show_shortcuts || self.show_device_info || self.show_setup_guide) {
             self.show_shortcuts = false;
             self.show_device_info = false;
             self.show_setup_guide = false;
+            return;
+        }
+
+        // When a modal or in-page dialog is open, do not forward remote control keys
+        if self.show_shortcuts || self.show_device_info || self.show_setup_guide {
             return;
         }
 
@@ -1685,6 +1707,11 @@ impl eframe::App for RokuRemoteApp {
                                 ui.label("🔇");
                                 ui.label(egui::RichText::new("M").strong().color(self.theme.accent));
                                 ui.label(egui::RichText::new("Mute").color(self.theme.foreground));
+                                ui.end_row();
+
+                                ui.label("⚙");
+                                ui.label(egui::RichText::new("S").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("Toggle Setup & Troubleshooting Guide").color(self.theme.foreground));
                                 ui.end_row();
 
                                 ui.label("🖥");
@@ -2161,7 +2188,7 @@ impl eframe::App for RokuRemoteApp {
                             do_toggle_power = true;
                         }
 
-                        if ui.add(egui::Button::new("⚙ Setup").selected(self.show_setup_guide)).clicked() {
+                        if ui.add(egui::Button::new("⚙ Setup").selected(self.show_setup_guide)).on_hover_text("Setup & Troubleshooting Guide (S)").clicked() {
                             self.show_setup_guide = !self.show_setup_guide;
                             if self.show_setup_guide {
                                 self.show_device_info = false;
@@ -2414,7 +2441,7 @@ impl eframe::App for RokuRemoteApp {
 
                         // In right_to_left, items are placed rightmost first: [⚙], then [ℹ], then [🔄]
                         if total_width >= 460.0 {
-                            if ui.add(egui::Button::new("⚙ Setup").selected(self.show_setup_guide)).clicked() {
+                            if ui.add(egui::Button::new("⚙ Setup").selected(self.show_setup_guide)).on_hover_text("Setup & Troubleshooting Guide (S)").clicked() {
                                 if self.show_setup_guide {
                                     self.show_setup_guide = false;
                                 } else {
@@ -2433,7 +2460,7 @@ impl eframe::App for RokuRemoteApp {
                                 }
                             }
                         } else {
-                            if ui.add_sized(btn_size, egui::Button::new("⚙").selected(self.show_setup_guide)).on_hover_text("Setup & Troubleshooting Guide").clicked() {
+                            if ui.add_sized(btn_size, egui::Button::new("⚙").selected(self.show_setup_guide)).on_hover_text("Setup & Troubleshooting Guide (S)").clicked() {
                                 if self.show_setup_guide {
                                     self.show_setup_guide = false;
                                 } else {

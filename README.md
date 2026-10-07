@@ -82,6 +82,7 @@ Roku Remote dynamically detects window width and automatically reflows its user 
 | **I** | Info / Options | Options / Asterisk (`*`) menu |
 | **Ctrl + Up / Down** | Volume | Volume Up / Volume Down |
 | **M** | Mute | Toggle audio mute |
+| **S** | Setup Guide | Toggle Setup & Troubleshooting Guide |
 | **Ctrl + M** | Window Size | Toggle window size (Min / Full Screen) |
 | **Ctrl + Shift + R** or **Ctrl + A** | Refresh Apps | Check and reload installed apps & icons |
 | **Ctrl + ,** | Cheat Sheet | Toggle keyboard shortcuts modal |
