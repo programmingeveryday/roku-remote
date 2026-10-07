@@ -31,12 +31,16 @@ A modern, fast, lightweight, and cross-platform native desktop remote control fo
   - Dedicated **`🔄 Refresh Apps`** button (and shortcut) to rescan and update installed channels anytime.
 - **Adaptive Responsive Layout**:
   - Dynamically detects window dimensions and reflows into wide (two-column) or narrow (single-column) views with zero text collisions or button crowding.
+  - Remote controls vertically align with the top of application cards in wide view.
+  - Device Info and Setup Guide automatically adapt between centered floating dialogs in wide mode and dedicated full-width in-page views in narrow mode.
+- **Persistent Window Size & Position**:
+  - Automatically restores your last-used window position and dimensions across launches.
 - **Full Keyboard Control & Shortcut Cheat Sheet**:
   - Direct keyboard control for navigation, volume, playback, and app refresh.
   - Built-in shortcuts cheat sheet modal (`Ctrl + ,` or `Esc` to close).
 - **Omarchy / System Desktop Theme Integration**:
   - Automatically detects and matches Omarchy system themes (`colors.toml`) with live hot-reloading.
-- **Device Details Modal**:
+- **Device Details View**:
   - Inspect model name, model number, software version, Wi-Fi network, UI resolution, power mode, IP address, and live/sleeping App Status.
 - **Modular & Idiomatic Rust Architecture**:
   - Refactored into clean modules (`app`, `models`, `roku::client`, `roku::parser`, `theme`) with 100% unit test coverage for XML parsers and color utilities.
@@ -48,16 +52,17 @@ A modern, fast, lightweight, and cross-platform native desktop remote control fo
 Roku Remote dynamically detects window width and automatically reflows its user interface:
 
 * **Wide Screen Mode (window width ≥ 680px)**: 
-  Splits into two side-by-side columns. Remote navigation and media playback controls remain pinned on the left (`300px`), while the full grid of quick-launch channel cards expands across the right side.
+  Splits into two side-by-side columns. Remote navigation and media playback controls remain pinned on the left (`300px`), vertically aligned with the channel cards, while the responsive grid of quick-launch channel cards expands across the right side. Dialog boxes display as centered modal windows.
 * **Compact / Narrow Window Mode (window width < 680px)**: 
   Automatically transitions into an uncrowded single-column layout:
   - **Header Bar**: App brand and status indicator on the left; clean action buttons (`Device Info`, `Setup`, `Power Toggle`) on the right.
-  - **Row 2A**: Full-width device dropdown selector and instant network refresh button (`[ 🔄 ]`).
-  - **Row 2B**: Real-time media playback state on the left and discovery / scan status on the right, completely eliminating text crowding.
+  - **Row 2**: Device selector dropdown with margin separation on the left, quick action toolbar on the right.
+  - **Row 3**: Real-time media playback state and discovery / scan status.
   - **Control & App Stack**: Ergonomic remote control pad followed by vertically scrollable quick-launch channel cards. Ideal for tiling window managers (Hyprland, Sway, i3) or sidebars.
+  - **Responsive In-Page Dialogs**: Device Details, Setup Guide, and Shortcuts cleanly render in-page with single-click `Close` buttons and auto-wrapping text down to 260px.
 
 <p align="center">
-  <img src="docs/images/screenshot-narrow.png" width="460" alt="Roku Remote Compact View" />
+  <img src="docs/images/screenshot-narrow.png" width="340" alt="Roku Remote Compact View" />
   <br/>
   <em>Automatic single-column reflow when window is resized below 680px</em>
 </p>
