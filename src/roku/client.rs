@@ -345,4 +345,51 @@ pub fn save_cached_last_ip(ip: &str) {
     }
 }
 
+/// Encodes a character for the Roku ECP `/keypress/Lit_<char>` command.
+/// Alphanumeric ASCII and unreserved characters are passed as-is.
+/// Spaces, punctuation, and UTF-8 multi-byte characters are URL percent-encoded.
+pub fn encode_char_for_lit(c: char) -> String {
+    if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~') {
+        format!("Lit_{}", c)
+    } else {
+        let mut buf = [0u8; 4];
+        let s = c.encode_utf8(&mut buf);
+        let mut encoded = String::new();
+        for b in s.as_bytes() {
+            encoded.push_str(&format!("%{:02X}", b));
+        }
+        format!("Lit_{}", encoded)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_encode_char_for_lit_alphanumeric() {
+        assert_eq!(encode_char_for_lit('a'), "Lit_a");
+        assert_eq!(encode_char_for_lit('Z'), "Lit_Z");
+        assert_eq!(encode_char_for_lit('5'), "Lit_5");
+    }
+
+    #[test]
+    fn test_encode_char_for_lit_special() {
+        assert_eq!(encode_char_for_lit(' '), "Lit_%20");
+        assert_eq!(encode_char_for_lit('@'), "Lit_%40");
+        assert_eq!(encode_char_for_lit('/'), "Lit_%2F");
+        assert_eq!(encode_char_for_lit('?'), "Lit_%3F");
+        assert_eq!(encode_char_for_lit('#'), "Lit_%23");
+        assert_eq!(encode_char_for_lit('&'), "Lit_%26");
+        assert_eq!(encode_char_for_lit('-'), "Lit_-");
+        assert_eq!(encode_char_for_lit('_'), "Lit__");
+    }
+
+    #[test]
+    fn test_encode_char_for_lit_unicode() {
+        assert_eq!(encode_char_for_lit('€'), "Lit_%E2%82%AC");
+        assert_eq!(encode_char_for_lit('ñ'), "Lit_%C3%B1");
+    }
+}
+
 

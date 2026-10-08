@@ -41,6 +41,7 @@ pub struct RokuRemoteApp {
     pub show_shortcuts: bool,
     pub pending_restore_to_min: u8,
     pub is_always_on_top: bool,
+    pub text_entry: String,
     pub theme: ThemeColors,
     pub ctx: egui::Context,
     pub rx: Receiver<BackgroundMessage>,
@@ -95,6 +96,7 @@ impl RokuRemoteApp {
             show_shortcuts: false,
             pending_restore_to_min: 0,
             is_always_on_top: false,
+            text_entry: String::new(),
             theme,
             ctx: cc.egui_ctx.clone(),
             rx,
@@ -199,6 +201,46 @@ impl RokuRemoteApp {
                 let _ = c.post(&url).send();
             }
             thread::sleep(Duration::from_millis(800));
+            update_active_app_worker(&ip, &tx, &ctx);
+            update_media_player_worker(&ip, &tx, &ctx);
+        });
+    }
+
+    pub fn send_text(&self, text: &str, submit_enter: bool) {
+        if text.is_empty() && !submit_enter {
+            return;
+        }
+        self.tv_powered_on.store(true, Ordering::Relaxed);
+        let ip = self.selected_device_ip.clone();
+        let text = text.to_string();
+        let tx = self.tx.clone();
+        let ctx = self.ctx.clone();
+
+        thread::spawn(move || {
+            let client = match reqwest::blocking::Client::builder()
+                .timeout(Duration::from_millis(1500))
+                .build()
+            {
+                Ok(c) => c,
+                Err(_) => return,
+            };
+
+            for ch in text.chars().filter(|c| *c != '\r' && *c != '\n') {
+                let lit = crate::roku::client::encode_char_for_lit(ch);
+                let url = format!("http://{}:8060/keypress/{}", ip, lit);
+                let _ = client.post(&url).send();
+                thread::sleep(Duration::from_millis(45));
+            }
+
+            if submit_enter {
+                if !text.is_empty() {
+                    thread::sleep(Duration::from_millis(60));
+                }
+                let url = format!("http://{}:8060/keypress/Enter", ip);
+                let _ = client.post(&url).send();
+            }
+
+            thread::sleep(Duration::from_millis(600));
             update_active_app_worker(&ip, &tx, &ctx);
             update_media_player_worker(&ip, &tx, &ctx);
         });
@@ -505,7 +547,7 @@ impl RokuRemoteApp {
         }
     }
 
-    pub fn render_controls_section(&self, ui: &mut egui::Ui, width: f32) {
+    pub fn render_controls_section(&mut self, ui: &mut egui::Ui, width: f32) {
         ui.vertical_centered(|ui| {
             let btn_dir = egui::vec2(58.0, 40.0);
             let btn_ok = egui::vec2(66.0, 42.0);
@@ -699,6 +741,111 @@ impl RokuRemoteApp {
                     self.send_key("VolumeMute");
                 }
             });
+
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(6.0);
+
+            // Dedicated Row 3: Keyboard / Text Entry to Roku
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("⌨ Keyboard / Text Entry")
+                        .size(12.0)
+                        .strong()
+                        .color(self.theme.accent),
+                );
+            });
+            ui.add_space(2.0);
+
+            let mut submit_text: Option<(String, bool)> = None;
+            let mut do_backspace = false;
+            let mut do_enter = false;
+
+            ui.horizontal(|ui| {
+                let send_btn_w = 62.0;
+                let field_w = (width - send_btn_w - 8.0).max(120.0);
+
+                let edit = egui::TextEdit::singleline(&mut self.text_entry)
+                    .hint_text("Type or paste text...")
+                    .desired_width(field_w);
+                let response = ui.add(edit);
+
+                let enter_pressed = response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let esc_pressed = response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape));
+                let backspace_on_empty = response.has_focus()
+                    && self.text_entry.is_empty()
+                    && ui.input(|i| i.key_pressed(egui::Key::Backspace));
+
+                if esc_pressed {
+                    response.surrender_focus();
+                }
+
+                if backspace_on_empty {
+                    do_backspace = true;
+                }
+
+                let send_btn = egui::Button::new(
+                    egui::RichText::new("Send ⏎")
+                        .strong()
+                        .color(egui::Color32::WHITE),
+                )
+                .fill(self.theme.roku_purple);
+
+                let send_clicked = ui.add_sized(egui::vec2(send_btn_w, 24.0), send_btn)
+                    .on_hover_text("Send text to Roku and submit Enter (Enter key)")
+                    .clicked();
+
+                if enter_pressed || send_clicked {
+                    if !self.text_entry.is_empty() {
+                        let to_send = std::mem::take(&mut self.text_entry);
+                        submit_text = Some((to_send, true));
+                    } else {
+                        do_enter = true;
+                    }
+                }
+            });
+
+            ui.add_space(3.0);
+
+            ui.horizontal(|ui| {
+                if ui.small_button("Send Text")
+                    .on_hover_text("Send text to Roku without pressing Enter")
+                    .clicked()
+                {
+                    if !self.text_entry.is_empty() {
+                        let to_send = std::mem::take(&mut self.text_entry);
+                        submit_text = Some((to_send, false));
+                    }
+                }
+
+                if ui.small_button("⌫ Backspace")
+                    .on_hover_text("Send Backspace key to Roku")
+                    .clicked()
+                {
+                    do_backspace = true;
+                }
+
+                if ui.small_button("⏎ Enter")
+                    .on_hover_text("Send Enter key to Roku")
+                    .clicked()
+                {
+                    do_enter = true;
+                }
+
+                if !self.text_entry.is_empty() && ui.small_button("Clear").clicked() {
+                    self.text_entry.clear();
+                }
+            });
+
+            if let Some((text, submit_enter)) = submit_text {
+                self.send_text(&text, submit_enter);
+            }
+            if do_backspace {
+                self.send_key("Backspace");
+            }
+            if do_enter {
+                self.send_key("Enter");
+            }
         });
     }
 
@@ -1355,6 +1502,7 @@ impl RokuRemoteApp {
                             ("🖥", "Ctrl + M", "Toggle window size (Min / Full Screen)"),
                             ("📌", "Ctrl + Shift + M", "Toggle Always-on-Top (compact size)"),
                             ("🔄", "Ctrl + Shift + R", "Refresh Quick Launch Apps"),
+                            ("⌨", "Text Box", "Type/paste to Roku (shortcuts paused while typing; Esc to unfocus)"),
                             ("💡", "Ctrl + ,", "Toggle shortcuts guide"),
                         ];
                         for (icon, keys, desc) in shortcuts {
@@ -1774,6 +1922,11 @@ impl eframe::App for RokuRemoteApp {
                                 ui.label("🔄");
                                 ui.label(egui::RichText::new("Ctrl + Shift + R").strong().color(self.theme.accent));
                                 ui.label(egui::RichText::new("Refresh Quick Launch Apps").color(self.theme.foreground));
+                                ui.end_row();
+
+                                ui.label("⌨");
+                                ui.label(egui::RichText::new("Text Box").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("Type/paste to Roku (shortcuts paused while typing; Esc to unfocus)").color(self.theme.foreground));
                                 ui.end_row();
 
                                 ui.label("💡");
