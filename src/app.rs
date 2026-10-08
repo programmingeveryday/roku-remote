@@ -526,9 +526,18 @@ impl RokuRemoteApp {
                 if ui.button("Close (Esc)").clicked() {
                     self.show_device_stats = false;
                 }
-                if self.device_stats.is_loading {
-                    ui.spinner();
-                } else if ui.button("🔄 Refresh").clicked() {
+                let refresh_text = if self.device_stats.is_loading {
+                    ui.ctx().request_repaint_after(Duration::from_millis(150));
+                    match ui.input(|i| (i.time * 3.0) as usize) % 4 {
+                        0 => "⏳ Refreshing",
+                        1 => "⏳ Refreshing.",
+                        2 => "⏳ Refreshing..",
+                        _ => "⏳ Refreshing...",
+                    }
+                } else {
+                    "🔄 Refresh"
+                };
+                if ui.add_enabled(!self.device_stats.is_loading, egui::Button::new(refresh_text)).clicked() {
                     self.fetch_device_stats();
                 }
                 if ui.button("ℹ Device Info").clicked() {
@@ -2020,6 +2029,7 @@ impl RokuRemoteApp {
                             ("✱", "O / *", "Options (*) menu on Roku"),
                             ("🔇", "M", "Mute"),
                             ("ℹ", "I", "Toggle Device Info dialog"),
+                            ("📊", "Ctrl + S", "Toggle Device & Stream Stats"),
                             ("⚙", "S", "Toggle Setup & Troubleshooting Guide"),
                             ("🖥", "Ctrl + M", "Toggle window size (Min / Full Screen)"),
                             ("📌", "Ctrl + Shift + M", "Toggle Always-on-Top (compact size)"),
@@ -2148,6 +2158,19 @@ impl RokuRemoteApp {
         if self.show_text_dialog {
             if key_escape {
                 self.show_text_dialog = false;
+            }
+            return;
+        }
+
+        // Ctrl + S -> Toggle Roku Device & Stream Stats dialog
+        if ctrl && !shift && key_s {
+            self.show_device_stats = !self.show_device_stats;
+            if self.show_device_stats {
+                self.show_device_info = false;
+                self.show_setup_guide = false;
+                self.show_shortcuts = false;
+                self.show_text_dialog = false;
+                self.fetch_device_stats();
             }
             return;
         }
@@ -2475,6 +2498,11 @@ impl eframe::App for RokuRemoteApp {
                                 ui.label("ℹ");
                                 ui.label(egui::RichText::new("I").strong().color(self.theme.accent));
                                 ui.label(egui::RichText::new("Toggle Device Info dialog").color(self.theme.foreground));
+                                ui.end_row();
+
+                                ui.label("📊");
+                                ui.label(egui::RichText::new("Ctrl + S").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("Toggle Device & Stream Stats").color(self.theme.foreground));
                                 ui.end_row();
 
                                 ui.label("⚙");
