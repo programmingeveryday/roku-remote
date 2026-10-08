@@ -200,7 +200,6 @@ impl RokuRemoteApp {
                     guard.clone()
                 };
                 if !ip.is_empty() {
-                    update_device_name_worker(&ip, &tx, &ctx);
                     update_media_player_worker(&ip, &tx, &ctx);
                 }
             }
@@ -1055,7 +1054,29 @@ impl RokuRemoteApp {
                     if info.state == "play" {
                         self.tv_powered_on.store(true, Ordering::Relaxed);
                     }
-                    self.media_player = info;
+                    // Continually update playback state & position without overwriting snapshot stats
+                    self.media_player.state = info.state;
+                    self.media_player.position_ms = info.position_ms;
+                    self.media_player.duration_ms = info.duration_ms;
+                    self.media_player.is_live = info.is_live;
+                    if !info.app_name.is_empty() {
+                        self.media_player.app_name = info.app_name;
+                    }
+                    if self.media_player.video_res.is_empty() && !info.video_res.is_empty() {
+                        self.media_player.video_res = info.video_res;
+                    }
+                    if self.media_player.video_codec.is_empty() && !info.video_codec.is_empty() {
+                        self.media_player.video_codec = info.video_codec;
+                    }
+                    if self.media_player.audio_codec.is_empty() && !info.audio_codec.is_empty() {
+                        self.media_player.audio_codec = info.audio_codec;
+                    }
+                    if self.media_player.container.is_empty() && !info.container.is_empty() {
+                        self.media_player.container = info.container;
+                    }
+                    if self.media_player.bandwidth_bps.is_none() && info.bandwidth_bps.is_some() {
+                        self.media_player.bandwidth_bps = info.bandwidth_bps;
+                    }
                 }
                 BackgroundMessage::DeviceDetailsUpdated(details) => {
                     let is_limited = details.ecp_setting_mode.eq_ignore_ascii_case("limited")
@@ -2347,15 +2368,8 @@ impl eframe::App for RokuRemoteApp {
         self.handle_incoming_messages(ctx);
         self.handle_keyboard_shortcuts(ctx);
 
-        // When stats view is open, poll live telemetry every ~2 seconds
-        if self.show_device_stats && !self.selected_device_ip.is_empty() {
-            let should_refresh = match self.device_stats.last_updated {
-                Some(last) => last.elapsed() >= Duration::from_millis(2000),
-                None => true,
-            };
-            if should_refresh && !self.device_stats.is_loading {
-                self.fetch_device_stats();
-            }
+        // When stats view is open, request repaint periodically so playback position advances smoothly
+        if self.show_device_stats {
             ctx.request_repaint_after(Duration::from_millis(1000));
         }
 
