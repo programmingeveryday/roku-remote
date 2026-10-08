@@ -412,7 +412,7 @@ impl RokuRemoteApp {
         // Prominent Text Input Box
         let prev_text = self.text_entry.clone();
         let edit = egui::TextEdit::singleline(&mut self.text_entry)
-            .hint_text("Start typing search, password, or URL...")
+            .hint_text("Start typing search or password...")
             .desired_width(ui.available_width());
         let response = ui.add(edit);
 
