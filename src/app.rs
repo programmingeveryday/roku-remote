@@ -3511,6 +3511,7 @@ impl eframe::App for RokuRemoteApp {
                         }
                     });
                 });
+            } else {
                 // NARROW SCREEN: Top-level ScrollArea
                 let is_dialog = self.show_device_info || self.show_device_stats || self.show_setup_guide || self.show_shortcuts || self.show_text_dialog;
                 let content_width = if is_dialog {
