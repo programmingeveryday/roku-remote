@@ -106,8 +106,7 @@ impl RokuRemoteApp {
                         }
                         LiveKeyCommand::Clear(count) => {
                             let url = format!("http://{}:8060/keypress/Backspace", ip);
-                            let backspaces = count.max(25).min(100);
-                            for _ in 0..backspaces {
+                            for _ in 0..count {
                                 let _ = c.post(&url).send();
                                 thread::sleep(Duration::from_millis(20));
                             }
@@ -312,6 +311,9 @@ impl RokuRemoteApp {
     }
 
     pub fn clear_text_on_roku(&self, count: usize) {
+        if count == 0 {
+            return;
+        }
         self.tv_powered_on.store(true, Ordering::Relaxed);
         let _ = self.live_key_tx.send(LiveKeyCommand::Clear(count));
     }
@@ -335,7 +337,9 @@ impl RokuRemoteApp {
         if delete_pressed {
             let count = prev_text.chars().count().max(self.text_entry.chars().count());
             self.text_entry.clear();
-            self.clear_text_on_roku(count);
+            if count > 0 {
+                self.clear_text_on_roku(count);
+            }
             return;
         }
 
