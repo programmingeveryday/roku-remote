@@ -469,34 +469,39 @@ impl RokuRemoteApp {
         egui::Frame::none()
             .fill(self.theme.lighter_background)
             .rounding(6.0)
-            .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+            .inner_margin(egui::Margin::symmetric(14.0, 10.0))
             .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                let inner_w = ui.available_width();
+                let col1_w = 75.0f32;
+                let col2_w = (inner_w - col1_w - 16.0).max(100.0);
+
                 ui.label(
                     egui::RichText::new("Live Keyboard Controls:")
                         .strong()
                         .size(11.5)
                         .color(self.theme.accent),
                 );
-                ui.add_space(2.0);
+                ui.add_space(4.0);
                 egui::Grid::new("live_keyboard_tips_grid")
-                    .spacing([10.0, 4.0])
+                    .num_columns(2)
+                    .spacing([12.0, 4.0])
+                    .min_col_width(col1_w)
+                    .max_col_width(col2_w)
                     .show(ui, |ui| {
-                        ui.label(egui::RichText::new("Type:").strong().color(self.theme.accent).size(11.0));
-                        ui.label(egui::RichText::new("Every key you press is sent to TV in real-time").color(self.theme.foreground).size(11.0));
-                        ui.end_row();
+                        let mut tip_row = |key: &str, desc: &str| {
+                            ui.label(egui::RichText::new(key).strong().color(self.theme.accent).size(11.0));
+                            ui.add(
+                                egui::Label::new(egui::RichText::new(desc).color(self.theme.foreground).size(11.0))
+                                    .wrap_mode(egui::TextWrapMode::Wrap),
+                            );
+                            ui.end_row();
+                        };
 
-                        ui.label(egui::RichText::new("Backspace:").strong().color(self.theme.accent).size(11.0));
-                        ui.label(egui::RichText::new("Deletes the last character on TV").color(self.theme.foreground).size(11.0));
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("Delete:").strong().color(self.theme.accent).size(11.0));
-                        ui.label(egui::RichText::new("Clears the entire text field on TV").color(self.theme.foreground).size(11.0));
-                        ui.end_row();
-
-                        ui.label(egui::RichText::new("Enter:").strong().color(self.theme.accent).size(11.0));
-                        ui.label(egui::RichText::new("Submits search or activates selected item").color(self.theme.foreground).size(11.0));
-                        ui.end_row();
-
+                        tip_row("Type:", "Every key you press is sent to TV in real-time");
+                        tip_row("Backspace:", "Deletes the last character on TV");
+                        tip_row("Delete:", "Clears the entire text field on TV");
+                        tip_row("Enter:", "Submits search or activates selected item");
                     });
             });
     }
