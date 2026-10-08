@@ -514,7 +514,7 @@ impl RokuRemoteApp {
     }
 
     pub fn render_device_stats_content(&mut self, ui: &mut egui::Ui, _content_width: f32) {
-        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+        ui.spacing_mut().item_spacing = egui::vec2(8.0, 10.0);
 
         // Header Row
         ui.horizontal(|ui| {
@@ -546,12 +546,14 @@ impl RokuRemoteApp {
         egui::Frame::none()
             .fill(self.theme.lighter_background)
             .rounding(6.0)
-            .inner_margin(egui::Margin::symmetric(12.0, 10.0))
+            .inner_margin(egui::Margin::symmetric(14.0, 10.0))
             .show(ui, |ui| {
-                ui.label(egui::RichText::new("📺 Device & Application").strong().size(12.5).color(self.theme.accent));
+                ui.label(egui::RichText::new("📺 Device & Application").strong().size(13.0).color(self.theme.accent));
                 ui.add_space(4.0);
                 egui::Grid::new("stats_device_status_grid")
-                    .spacing([14.0, 6.0])
+                    .num_columns(2)
+                    .spacing([18.0, 6.0])
+                    .min_col_width(140.0)
                     .show(ui, |ui| {
                         ui.label(egui::RichText::new("Target Device:").strong().size(11.5).color(self.theme.accent));
                         ui.label(egui::RichText::new(format!("{} ({})", self.device_name, self.selected_device_ip)).size(11.5).color(self.theme.foreground));
@@ -571,6 +573,12 @@ impl RokuRemoteApp {
                         };
                         ui.label(egui::RichText::new(state_str).strong().size(11.5).color(state_color));
                         ui.end_row();
+
+                        if self.media_player.is_live {
+                            ui.label(egui::RichText::new("Broadcast Mode:").strong().size(11.5).color(self.theme.accent));
+                            ui.label(egui::RichText::new("🔴 Live Stream").strong().size(11.5).color(egui::Color32::from_rgb(231, 76, 60)));
+                            ui.end_row();
+                        }
                     });
             });
 
@@ -587,16 +595,18 @@ impl RokuRemoteApp {
         egui::Frame::none()
             .fill(self.theme.lighter_background)
             .rounding(6.0)
-            .inner_margin(egui::Margin::symmetric(12.0, 10.0))
+            .inner_margin(egui::Margin::symmetric(14.0, 10.0))
             .show(ui, |ui| {
-                ui.label(egui::RichText::new("📡 Live Media Stream Telemetry").strong().size(12.5).color(self.theme.accent));
+                ui.label(egui::RichText::new("📡 Live Media Stream Telemetry").strong().size(13.0).color(self.theme.accent));
                 ui.add_space(4.0);
 
                 if !has_stream {
-                    ui.label(egui::RichText::new("No active media stream currently playing. Launch a channel to see real-time streaming bandwidth and codec metrics.").size(11.0).color(self.theme.dark_foreground));
+                    ui.label(egui::RichText::new("No active media stream currently playing. Launch a channel or start playback to view real-time streaming bandwidth, resolution, and codec diagnostics.").size(11.0).color(self.theme.dark_foreground));
                 } else {
                     egui::Grid::new("stats_stream_grid")
-                        .spacing([14.0, 6.0])
+                        .num_columns(2)
+                        .spacing([18.0, 6.0])
+                        .min_col_width(140.0)
                         .show(ui, |ui| {
                             // Bandwidth
                             ui.label(egui::RichText::new("Stream Bandwidth:").strong().size(11.5).color(self.theme.accent));
@@ -662,6 +672,20 @@ impl RokuRemoteApp {
                                     ui.end_row();
                                 }
                             }
+
+                            // Captions
+                            if !self.media_player.captions.is_empty() {
+                                ui.label(egui::RichText::new("Captions / Subtitles:").strong().size(11.5).color(self.theme.accent));
+                                ui.label(egui::RichText::new(&self.media_player.captions).size(11.5).color(self.theme.foreground));
+                                ui.end_row();
+                            }
+
+                            // DRM
+                            if !self.media_player.drm.is_empty() {
+                                ui.label(egui::RichText::new("DRM Protection:").strong().size(11.5).color(self.theme.accent));
+                                ui.label(egui::RichText::new(&self.media_player.drm).size(11.5).color(self.theme.foreground));
+                                ui.end_row();
+                            }
                         });
                 }
             });
@@ -672,12 +696,14 @@ impl RokuRemoteApp {
         egui::Frame::none()
             .fill(self.theme.lighter_background)
             .rounding(6.0)
-            .inner_margin(egui::Margin::symmetric(12.0, 10.0))
+            .inner_margin(egui::Margin::symmetric(14.0, 10.0))
             .show(ui, |ui| {
-                ui.label(egui::RichText::new("⚙ Hardware & System Diagnostics").strong().size(12.5).color(self.theme.accent));
+                ui.label(egui::RichText::new("⚙ Hardware & System Diagnostics").strong().size(13.0).color(self.theme.accent));
                 ui.add_space(4.0);
                 egui::Grid::new("stats_hardware_grid")
-                    .spacing([14.0, 6.0])
+                    .num_columns(2)
+                    .spacing([18.0, 6.0])
+                    .min_col_width(140.0)
                     .show(ui, |ui| {
                         // System Uptime
                         ui.label(egui::RichText::new("System Uptime:").strong().size(11.5).color(self.theme.accent));
@@ -726,6 +752,34 @@ impl RokuRemoteApp {
                             ui.end_row();
                         }
 
+                        // Ethernet
+                        if self.device_details.supports_ethernet {
+                            ui.label(egui::RichText::new("Ethernet Port:").strong().size(11.5).color(self.theme.accent));
+                            ui.label(egui::RichText::new("Supported").size(11.5).color(self.theme.foreground));
+                            ui.end_row();
+                        }
+
+                        // Private Listening & AirPlay
+                        if self.device_details.supports_private_listening || self.device_details.supports_airplay {
+                            ui.label(egui::RichText::new("Audio Features:").strong().size(11.5).color(self.theme.accent));
+                            let mut feats = Vec::new();
+                            if self.device_details.supports_private_listening {
+                                feats.push("Private Listening (Headphones)");
+                            }
+                            if self.device_details.supports_airplay {
+                                feats.push("Apple AirPlay");
+                            }
+                            ui.label(egui::RichText::new(feats.join(", ")).size(11.5).color(self.theme.foreground));
+                            ui.end_row();
+                        }
+
+                        // Time Zone
+                        if !self.device_details.time_zone.is_empty() {
+                            ui.label(egui::RichText::new("Time Zone:").strong().size(11.5).color(self.theme.accent));
+                            ui.label(egui::RichText::new(&self.device_details.time_zone).size(11.5).color(self.theme.foreground));
+                            ui.end_row();
+                        }
+
                         // MAC Addresses
                         if !self.device_details.wifi_mac.is_empty() {
                             ui.label(egui::RichText::new("MAC Addresses:").strong().size(11.5).color(self.theme.accent));
@@ -745,44 +799,8 @@ impl RokuRemoteApp {
                             ui.label(egui::RichText::new(build_str).size(11.5).color(self.theme.foreground));
                             ui.end_row();
                         }
-
-                        // Developer Mode stats (if active)
-                        if self.device_details.developer_enabled {
-                            if let Some(cp) = &self.device_stats.chanperf {
-                                if cp.status == "OK" {
-                                    ui.label(egui::RichText::new("CPU Utilization:").strong().size(11.5).color(self.theme.accent));
-                                    ui.label(egui::RichText::new(format!("{:.1}% (usr: {:.1}%, sys: {:.1}%)", cp.cpu_percent, cp.user_cpu_percent, cp.sys_cpu_percent)).size(11.5).color(self.theme.foreground));
-                                    ui.end_row();
-
-                                    ui.label(egui::RichText::new("RAM Footprint:").strong().size(11.5).color(self.theme.accent));
-                                    ui.label(egui::RichText::new(format!("{:.1} MB", cp.memory_mb)).size(11.5).color(self.theme.foreground));
-                                    ui.end_row();
-                                }
-                            }
-                            if let Some(fr) = &self.device_stats.frame_rate {
-                                if fr.status == "OK" && fr.fps > 0.0 {
-                                    ui.label(egui::RichText::new("Graphics Frame Rate:").strong().size(11.5).color(self.theme.accent));
-                                    ui.label(egui::RichText::new(format!("{:.1} FPS", fr.fps)).size(11.5).color(self.theme.foreground));
-                                    ui.end_row();
-                                }
-                            }
-                        }
                     });
             });
-
-        ui.add_space(4.0);
-
-        // Section 4: Developer Mode Note (compact & subtle)
-        if !self.device_details.developer_enabled {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("💡").size(12.0));
-                ui.label(
-                    egui::RichText::new("Raw chip CPU/RAM profiling is restricted by Roku to Developer Mode (enabled on TV with physical remote).")
-                        .size(10.5)
-                        .color(self.theme.dark_foreground),
-                );
-            });
-        }
     }
 
     pub fn render_device_stats_narrow(&mut self, ui: &mut egui::Ui, content_width: f32) {
@@ -1055,10 +1073,6 @@ impl RokuRemoteApp {
                     self.device_details = details;
                 }
                 BackgroundMessage::DeviceStatsUpdated {
-                    chanperf,
-                    frame_rate,
-                    bitmaps,
-                    sgnodes,
                     media_player,
                     device_details,
                 } => {
@@ -1070,42 +1084,8 @@ impl RokuRemoteApp {
                     }
 
                     if let Some(mp) = media_player {
-                        let mbps = if let Some(bps) = mp.bandwidth_bps {
-                            (bps as f32) / 1_000_000.0
-                        } else if let Some(bps) = mp.video_bitrate_bps {
-                            (bps as f32) / 1_000_000.0
-                        } else {
-                            0.0
-                        };
-                        self.device_stats.bandwidth_history.push(mbps);
-                        if self.device_stats.bandwidth_history.len() > 40 {
-                            self.device_stats.bandwidth_history.remove(0);
-                        }
                         self.media_player = mp;
                     }
-
-                    if chanperf.status == "OK" {
-                        self.device_stats.cpu_history.push(chanperf.cpu_percent);
-                        if self.device_stats.cpu_history.len() > 40 {
-                            self.device_stats.cpu_history.remove(0);
-                        }
-                        self.device_stats.ram_history.push(chanperf.memory_mb);
-                        if self.device_stats.ram_history.len() > 40 {
-                            self.device_stats.ram_history.remove(0);
-                        }
-                    }
-
-                    if frame_rate.status == "OK" && frame_rate.fps > 0.0 {
-                        self.device_stats.fps_history.push(frame_rate.fps);
-                        if self.device_stats.fps_history.len() > 40 {
-                            self.device_stats.fps_history.remove(0);
-                        }
-                    }
-
-                    self.device_stats.chanperf = Some(chanperf);
-                    self.device_stats.frame_rate = Some(frame_rate);
-                    self.device_stats.bitmaps = Some(bitmaps);
-                    self.device_stats.sgnodes = Some(sgnodes);
                 }
                 BackgroundMessage::PowerStateUpdated(reachable) => {
                     let was_reachable = self.is_device_reachable;
