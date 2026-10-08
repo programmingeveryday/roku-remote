@@ -547,12 +547,13 @@ impl RokuRemoteApp {
             .rounding(6.0)
             .inner_margin(egui::Margin::symmetric(14.0, 10.0))
             .show(ui, |ui| {
+                ui.set_width(ui.available_width());
                 ui.label(egui::RichText::new("📺 Device & Application").strong().size(13.0).color(self.theme.accent));
                 ui.add_space(4.0);
                 egui::Grid::new("stats_device_status_grid")
                     .num_columns(2)
                     .spacing([18.0, 6.0])
-                    .min_col_width(140.0)
+                    .min_col_width(150.0)
                     .show(ui, |ui| {
                         ui.label(egui::RichText::new("Target Device:").strong().size(11.5).color(self.theme.accent));
                         ui.label(egui::RichText::new(format!("{} ({})", self.device_name, self.selected_device_ip)).size(11.5).color(self.theme.foreground));
@@ -596,6 +597,7 @@ impl RokuRemoteApp {
             .rounding(6.0)
             .inner_margin(egui::Margin::symmetric(14.0, 10.0))
             .show(ui, |ui| {
+                ui.set_width(ui.available_width());
                 ui.label(egui::RichText::new("📡 Live Media Stream Telemetry").strong().size(13.0).color(self.theme.accent));
                 ui.add_space(4.0);
 
@@ -605,7 +607,7 @@ impl RokuRemoteApp {
                     egui::Grid::new("stats_stream_grid")
                         .num_columns(2)
                         .spacing([18.0, 6.0])
-                        .min_col_width(140.0)
+                        .min_col_width(150.0)
                         .show(ui, |ui| {
                             // Bandwidth
                             ui.label(egui::RichText::new("Stream Bandwidth:").strong().size(11.5).color(self.theme.accent));
@@ -697,12 +699,13 @@ impl RokuRemoteApp {
             .rounding(6.0)
             .inner_margin(egui::Margin::symmetric(14.0, 10.0))
             .show(ui, |ui| {
+                ui.set_width(ui.available_width());
                 ui.label(egui::RichText::new("⚙ Hardware & System Diagnostics").strong().size(13.0).color(self.theme.accent));
                 ui.add_space(4.0);
                 egui::Grid::new("stats_hardware_grid")
                     .num_columns(2)
                     .spacing([18.0, 6.0])
-                    .min_col_width(140.0)
+                    .min_col_width(150.0)
                     .show(ui, |ui| {
                         // System Uptime
                         ui.label(egui::RichText::new("System Uptime:").strong().size(11.5).color(self.theme.accent));
@@ -2709,6 +2712,7 @@ impl eframe::App for RokuRemoteApp {
                     .max_width(max_modal_w)
                     .show(ctx, |ui| {
                         egui::ScrollArea::vertical()
+                            .auto_shrink([false, false])
                             .max_height((ui.ctx().screen_rect().height() - 90.0).max(250.0))
                             .show(ui, |ui| {
                                 self.render_device_stats_content(ui, modal_w);
