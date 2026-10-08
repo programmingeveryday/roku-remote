@@ -41,6 +41,8 @@ pub struct RokuRemoteApp {
     pub show_shortcuts: bool,
     pub pending_restore_to_min: u8,
     pub is_always_on_top: bool,
+    pub show_text_dialog: bool,
+    pub focus_text_input: bool,
     pub text_entry: String,
     pub theme: ThemeColors,
     pub ctx: egui::Context,
@@ -96,6 +98,8 @@ impl RokuRemoteApp {
             show_shortcuts: false,
             pending_restore_to_min: 0,
             is_always_on_top: false,
+            show_text_dialog: false,
+            focus_text_input: false,
             text_entry: String::new(),
             theme,
             ctx: cc.egui_ctx.clone(),
@@ -746,105 +750,19 @@ impl RokuRemoteApp {
             ui.separator();
             ui.add_space(6.0);
 
-            // Dedicated Row 3: Keyboard / Text Entry to Roku
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("⌨ Keyboard / Text Entry")
-                        .size(12.0)
-                        .strong()
-                        .color(self.theme.accent),
-                );
-            });
-            ui.add_space(2.0);
-
-            let mut submit_text: Option<(String, bool)> = None;
-            let mut do_backspace = false;
-            let mut do_enter = false;
-
-            ui.horizontal(|ui| {
-                let send_btn_w = 62.0;
-                let field_w = (width - send_btn_w - 8.0).max(120.0);
-
-                let edit = egui::TextEdit::singleline(&mut self.text_entry)
-                    .hint_text("Type or paste text...")
-                    .desired_width(field_w);
-                let response = ui.add(edit);
-
-                let enter_pressed = response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let esc_pressed = response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape));
-                let backspace_on_empty = response.has_focus()
-                    && self.text_entry.is_empty()
-                    && ui.input(|i| i.key_pressed(egui::Key::Backspace));
-
-                if esc_pressed {
-                    response.surrender_focus();
-                }
-
-                if backspace_on_empty {
-                    do_backspace = true;
-                }
-
-                let send_btn = egui::Button::new(
-                    egui::RichText::new("Send ⏎")
-                        .strong()
-                        .color(egui::Color32::WHITE),
-                )
-                .fill(self.theme.roku_purple);
-
-                let send_clicked = ui.add_sized(egui::vec2(send_btn_w, 24.0), send_btn)
-                    .on_hover_text("Send text to Roku and submit Enter (Enter key)")
-                    .clicked();
-
-                if enter_pressed || send_clicked {
-                    if !self.text_entry.is_empty() {
-                        let to_send = std::mem::take(&mut self.text_entry);
-                        submit_text = Some((to_send, true));
-                    } else {
-                        do_enter = true;
-                    }
-                }
-            });
-
-            ui.add_space(3.0);
-
-            ui.horizontal(|ui| {
-                if ui.small_button("Send Text")
-                    .on_hover_text("Send text to Roku without pressing Enter")
-                    .clicked()
-                {
-                    if !self.text_entry.is_empty() {
-                        let to_send = std::mem::take(&mut self.text_entry);
-                        submit_text = Some((to_send, false));
-                    }
-                }
-
-                if ui.small_button("⌫ Backspace")
-                    .on_hover_text("Send Backspace key to Roku")
-                    .clicked()
-                {
-                    do_backspace = true;
-                }
-
-                if ui.small_button("⏎ Enter")
-                    .on_hover_text("Send Enter key to Roku")
-                    .clicked()
-                {
-                    do_enter = true;
-                }
-
-                if !self.text_entry.is_empty() && ui.small_button("Clear").clicked() {
-                    self.text_entry.clear();
-                }
-            });
-
-            if let Some((text, submit_enter)) = submit_text {
-                self.send_text(&text, submit_enter);
-            }
-            if do_backspace {
-                self.send_key("Backspace");
-            }
-            if do_enter {
-                self.send_key("Enter");
+            // Clean single button to open Text Entry Dialogue Box
+            let text_btn = egui::Button::new(
+                egui::RichText::new("⌨ Keyboard / Enter Text (K)")
+                    .size(12.0)
+                    .color(self.theme.foreground),
+            );
+            let btn_w = (width - 24.0).clamp(160.0, 240.0);
+            if ui.add_sized(egui::vec2(btn_w, 28.0), text_btn)
+                .on_hover_text("Open dialogue box to type or paste text to Roku (K)")
+                .clicked()
+            {
+                self.show_text_dialog = true;
+                self.focus_text_input = true;
             }
         });
     }
@@ -1502,7 +1420,7 @@ impl RokuRemoteApp {
                             ("🖥", "Ctrl + M", "Toggle window size (Min / Full Screen)"),
                             ("📌", "Ctrl + Shift + M", "Toggle Always-on-Top (compact size)"),
                             ("🔄", "Ctrl + Shift + R", "Refresh Quick Launch Apps"),
-                            ("⌨", "Text Box", "Type/paste to Roku (shortcuts paused while typing; Esc to unfocus)"),
+                            ("⌨", "K", "Open Keyboard & Text Entry dialogue box"),
                             ("💡", "Ctrl + ,", "Toggle shortcuts guide"),
                         ];
                         for (icon, keys, desc) in shortcuts {
@@ -1548,6 +1466,7 @@ impl RokuRemoteApp {
             key_p,
             key_a,
             key_s,
+            key_k,
             key_comma,
         ) = ctx.input(|i| {
             (
@@ -1569,6 +1488,7 @@ impl RokuRemoteApp {
                 i.key_pressed(egui::Key::P),
                 i.key_pressed(egui::Key::A),
                 i.key_pressed(egui::Key::S),
+                i.key_pressed(egui::Key::K),
                 i.key_pressed(egui::Key::Comma),
             )
         });
@@ -1626,6 +1546,7 @@ impl RokuRemoteApp {
             if self.show_setup_guide {
                 self.show_device_info = false;
                 self.show_shortcuts = false;
+                self.show_text_dialog = false;
             }
             return;
         }
@@ -1636,20 +1557,34 @@ impl RokuRemoteApp {
             if self.show_device_info {
                 self.show_setup_guide = false;
                 self.show_shortcuts = false;
+                self.show_text_dialog = false;
+            }
+            return;
+        }
+
+        // K -> Toggle Keyboard / Text Entry dialog box
+        if !ctrl && key_k {
+            self.show_text_dialog = !self.show_text_dialog;
+            if self.show_text_dialog {
+                self.focus_text_input = true;
+                self.show_setup_guide = false;
+                self.show_device_info = false;
+                self.show_shortcuts = false;
             }
             return;
         }
 
         // Escape closes any open modal dialog
-        if key_escape && (self.show_shortcuts || self.show_device_info || self.show_setup_guide) {
+        if key_escape && (self.show_shortcuts || self.show_device_info || self.show_setup_guide || self.show_text_dialog) {
             self.show_shortcuts = false;
             self.show_device_info = false;
             self.show_setup_guide = false;
+            self.show_text_dialog = false;
             return;
         }
 
         // When a modal or in-page dialog is open, do not forward remote control keys
-        if self.show_shortcuts || self.show_device_info || self.show_setup_guide {
+        if self.show_shortcuts || self.show_device_info || self.show_setup_guide || self.show_text_dialog {
             return;
         }
 
@@ -1826,6 +1761,113 @@ impl eframe::App for RokuRemoteApp {
         // In wide view (>= 680px), show dialogs as centered floating modal windows.
         // In narrow view (< 680px), dialogs are rendered cleanly in-page inside CentralPanel.
         let is_wide = ctx.screen_rect().width() >= 680.0;
+        // Text Entry Modal Dialog (dialogue box for typing text to Roku, active in both wide and narrow modes)
+        if self.show_text_dialog {
+            let modal_w = (ctx.screen_rect().width() - 32.0).clamp(280.0, 360.0);
+            let mut close_dialog = false;
+
+            egui::Window::new("⌨ Text Entry to Roku")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .fixed_size(egui::vec2(modal_w, 0.0))
+                .show(ctx, |ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+                    ui.label(
+                        egui::RichText::new("Type or paste text to send to Roku's on-screen keyboard:")
+                            .size(12.0)
+                            .color(self.theme.foreground),
+                    );
+
+                    let edit = egui::TextEdit::singleline(&mut self.text_entry)
+                        .hint_text("Type search term, password, URL...")
+                        .desired_width(ui.available_width());
+                    let response = ui.add(edit);
+
+                    if self.focus_text_input {
+                        response.request_focus();
+                        self.focus_text_input = false;
+                    }
+
+                    let enter_pressed = response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let esc_pressed = ui.input(|i| i.key_pressed(egui::Key::Escape));
+
+                    if esc_pressed {
+                        close_dialog = true;
+                    }
+
+                    ui.add_space(2.0);
+
+                    // Primary action buttons row
+                    ui.horizontal(|ui| {
+                        let send_enter_btn = egui::Button::new(
+                            egui::RichText::new("Send & Enter")
+                                .strong()
+                                .color(egui::Color32::WHITE),
+                        )
+                        .fill(self.theme.roku_purple);
+
+                        let send_enter_clicked = ui.add(send_enter_btn)
+                            .on_hover_text("Send text to Roku and press Enter key")
+                            .clicked();
+
+                        if enter_pressed || send_enter_clicked {
+                            if !self.text_entry.is_empty() {
+                                let to_send = std::mem::take(&mut self.text_entry);
+                                self.send_text(&to_send, true);
+                            } else {
+                                self.send_key("Enter");
+                            }
+                            close_dialog = true;
+                        }
+
+                        if ui.button("Send Text")
+                            .on_hover_text("Send text to Roku without pressing Enter")
+                            .clicked()
+                        {
+                            if !self.text_entry.is_empty() {
+                                let to_send = std::mem::take(&mut self.text_entry);
+                                self.send_text(&to_send, false);
+                            }
+                            close_dialog = true;
+                        }
+
+                        if !self.text_entry.is_empty() && ui.button("Clear").clicked() {
+                            self.text_entry.clear();
+                        }
+                    });
+
+                    ui.separator();
+
+                    // Quick keys & Close row
+                    ui.horizontal(|ui| {
+                        if ui.button("Backspace")
+                            .on_hover_text("Send Backspace key to Roku")
+                            .clicked()
+                        {
+                            self.send_key("Backspace");
+                        }
+
+                        if ui.button("Enter")
+                            .on_hover_text("Send Enter key to Roku")
+                            .clicked()
+                        {
+                            self.send_key("Enter");
+                        }
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Close (Esc)").clicked() {
+                                close_dialog = true;
+                            }
+                        });
+                    });
+                });
+
+            if close_dialog {
+                self.show_text_dialog = false;
+            }
+        }
+
         let max_modal_w = (ctx.screen_rect().width() - 40.0).max(300.0);
 
         if is_wide {
@@ -1925,8 +1967,8 @@ impl eframe::App for RokuRemoteApp {
                                 ui.end_row();
 
                                 ui.label("⌨");
-                                ui.label(egui::RichText::new("Text Box").strong().color(self.theme.accent));
-                                ui.label(egui::RichText::new("Type/paste to Roku (shortcuts paused while typing; Esc to unfocus)").color(self.theme.foreground));
+                                ui.label(egui::RichText::new("K").strong().color(self.theme.accent));
+                                ui.label(egui::RichText::new("Open Keyboard & Text Entry dialogue box").color(self.theme.foreground));
                                 ui.end_row();
 
                                 ui.label("💡");
@@ -2653,7 +2695,7 @@ impl eframe::App for RokuRemoteApp {
                         ui.add_space(4.0);
                         let btn_size = egui::vec2(24.0, 24.0);
 
-                        // In right_to_left, items are placed rightmost first: [⚙], then [ℹ], then [🔄]
+                        // In right_to_left, items are placed rightmost first: [⚙], then [ℹ], then [⌨], then [🔄]
                         if total_width >= 460.0 {
                             if ui.add(egui::Button::new("⚙ Setup").selected(self.show_setup_guide)).on_hover_text("Setup & Troubleshooting Guide (S)").clicked() {
                                 if self.show_setup_guide {
@@ -2662,6 +2704,7 @@ impl eframe::App for RokuRemoteApp {
                                     self.show_setup_guide = true;
                                     self.show_device_info = false;
                                     self.show_shortcuts = false;
+                                    self.show_text_dialog = false;
                                 }
                             }
                             if ui.add(egui::Button::new("ℹ Device Info").selected(self.show_device_info)).on_hover_text("Roku Device Details (I)").clicked() {
@@ -2670,6 +2713,18 @@ impl eframe::App for RokuRemoteApp {
                                 } else {
                                     self.show_device_info = true;
                                     self.show_setup_guide = false;
+                                    self.show_shortcuts = false;
+                                    self.show_text_dialog = false;
+                                }
+                            }
+                            if ui.add(egui::Button::new("⌨ Text").selected(self.show_text_dialog)).on_hover_text("Type/Paste text to Roku (K)").clicked() {
+                                if self.show_text_dialog {
+                                    self.show_text_dialog = false;
+                                } else {
+                                    self.show_text_dialog = true;
+                                    self.focus_text_input = true;
+                                    self.show_setup_guide = false;
+                                    self.show_device_info = false;
                                     self.show_shortcuts = false;
                                 }
                             }
@@ -2681,6 +2736,7 @@ impl eframe::App for RokuRemoteApp {
                                     self.show_setup_guide = true;
                                     self.show_device_info = false;
                                     self.show_shortcuts = false;
+                                    self.show_text_dialog = false;
                                 }
                             }
                             if ui.add_sized(btn_size, egui::Button::new("ℹ").selected(self.show_device_info)).on_hover_text("Roku Device Details (I)").clicked() {
@@ -2689,6 +2745,18 @@ impl eframe::App for RokuRemoteApp {
                                 } else {
                                     self.show_device_info = true;
                                     self.show_setup_guide = false;
+                                    self.show_shortcuts = false;
+                                    self.show_text_dialog = false;
+                                }
+                            }
+                            if ui.add_sized(btn_size, egui::Button::new("⌨").selected(self.show_text_dialog)).on_hover_text("Type/Paste text to Roku (K)").clicked() {
+                                if self.show_text_dialog {
+                                    self.show_text_dialog = false;
+                                } else {
+                                    self.show_text_dialog = true;
+                                    self.focus_text_input = true;
+                                    self.show_setup_guide = false;
+                                    self.show_device_info = false;
                                     self.show_shortcuts = false;
                                 }
                             }
@@ -2776,7 +2844,7 @@ impl eframe::App for RokuRemoteApp {
             let is_limited = self.is_device_reachable
                 && (self.device_details.ecp_setting_mode.eq_ignore_ascii_case("limited")
                     || self.device_details.ecp_setting_mode.eq_ignore_ascii_case("disabled"));
-            let is_dialog_open_narrow = !is_wide && (self.show_device_info || self.show_setup_guide || self.show_shortcuts);
+            let is_dialog_open_narrow = !is_wide && (self.show_device_info || self.show_setup_guide || self.show_shortcuts || self.show_text_dialog);
 
             if !is_dialog_open_narrow {
                 if is_limited {
@@ -2792,6 +2860,7 @@ impl eframe::App for RokuRemoteApp {
                             self.show_setup_guide = true;
                             self.show_device_info = false;
                             self.show_shortcuts = false;
+                            self.show_text_dialog = false;
                         }
                     });
                 } else if !self.is_device_reachable && !self.is_scanning && !self.selected_device_ip.is_empty() {
@@ -2806,6 +2875,7 @@ impl eframe::App for RokuRemoteApp {
                             self.show_setup_guide = true;
                             self.show_device_info = false;
                             self.show_shortcuts = false;
+                            self.show_text_dialog = false;
                         }
                     });
                 }

@@ -38,11 +38,12 @@ A modern, fast, lightweight, and cross-platform native desktop remote control fo
 - **Full Keyboard Control & Shortcut Cheat Sheet**:
   - Direct keyboard control for navigation, volume, playback, and app refresh.
   - Built-in shortcuts cheat sheet modal (`Ctrl + ,` or `Esc` to close).
-- **Interactive Keyboard & Text Entry**:
-  - Dedicated text entry field to type or paste search terms, passwords, and URLs directly into Roku on-screen keyboards.
-  - Automatically streams encoded keystrokes (`Lit_<char>`) sequentially with optional automatic `Enter` submission.
-  - Pauses global remote control shortcuts (`H`, `P`, `S`, etc.) while editing the text field so typing is seamless. Press `Esc` to unfocus and return to D-pad navigation.
-  - Quick utility buttons for `Send Text`, `⌫ Backspace`, and `⏎ Enter`.
+- **Interactive Keyboard & Text Entry Dialogue Box**:
+  - Dedicated dialogue modal (open with `K`, header button, or remote button) to type or paste search terms, passwords, and URLs directly into Roku on-screen keyboards.
+  - Keeps the remote control interface completely clean and uncluttered.
+  - Automatically streams encoded keystrokes (`Lit_<char>`) sequentially with automatic `Enter` submission.
+  - Pauses global remote control shortcuts while editing the dialogue box so typing is seamless. Press `Esc` or `Send & Enter` to close.
+  - Utility buttons for `Send Text`, `Backspace`, and `Enter`.
 - **Omarchy / System Desktop Theme Integration**:
   - Automatically detects and matches Omarchy system themes (`colors.toml`) with live hot-reloading.
 - **Device Details View**:
@@ -93,7 +94,7 @@ Roku Remote dynamically detects window width and automatically reflows its user 
 | **Ctrl + Shift + M** | Always on Top | Toggle Always-on-Top (compact size) |
 | **Ctrl + Shift + R** or **Ctrl + A** | Refresh Apps | Check and reload installed apps & icons |
 | **Ctrl + ,** | Cheat Sheet | Toggle keyboard shortcuts modal |
-| **Text Field** | Text Entry | Type or paste text to Roku (`Lit_<char>`). Remote shortcuts are paused while editing; `Esc` unfocuses |
+| **K** | Text Entry | Open Keyboard & Text Entry dialogue box to type/paste to Roku |
 
 ---
 
