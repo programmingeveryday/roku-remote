@@ -371,17 +371,31 @@ pub fn fetch_device_stats_worker(
     let fps_xml = get_xml("graphics-frame-rate");
     let bitmaps_xml = get_xml("r2d2-bitmaps");
     let sgnodes_xml = get_xml("sgnodes/roots");
+    let media_xml = get_xml("media-player");
+    let dev_xml = get_xml("device-info");
 
     let chanperf = parse_chanperf_xml(&chanperf_xml);
     let frame_rate = parse_graphics_frame_rate_xml(&fps_xml);
     let bitmaps = parse_r2d2_bitmaps_xml(&bitmaps_xml);
     let sgnodes = parse_sgnodes_xml(&sgnodes_xml);
+    let media_player = if !media_xml.is_empty() {
+        Some(crate::roku::parser::parse_media_player_xml(&media_xml))
+    } else {
+        None
+    };
+    let device_details = if !dev_xml.is_empty() {
+        Some(crate::roku::parser::parse_device_details_xml(&dev_xml))
+    } else {
+        None
+    };
 
     let _ = tx.send(BackgroundMessage::DeviceStatsUpdated {
         chanperf,
         frame_rate,
         bitmaps,
         sgnodes,
+        media_player,
+        device_details,
     });
     ctx.request_repaint();
 }

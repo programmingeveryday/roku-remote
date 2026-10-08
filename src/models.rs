@@ -17,6 +17,15 @@ pub struct MediaPlayerInfo {
     pub state: String, // "play", "pause", "buffer", "none"
     pub app_name: String,
     pub position_ms: Option<u64>,
+    pub duration_ms: Option<u64>,
+    pub bandwidth_bps: Option<u64>,
+    pub video_bitrate_bps: Option<u64>,
+    pub video_res: String,
+    pub video_codec: String,
+    pub audio_codec: String,
+    pub container: String,
+    pub buffer_current: Option<u32>,
+    pub buffer_max: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -24,16 +33,20 @@ pub struct DeviceDetails {
     pub model_name: String,
     pub model_number: String,
     pub software_version: String,
+    pub build_number: String,
     pub network_name: String,
     pub power_mode: String,
     pub ui_resolution: String,
     pub user_location: String,
     pub ecp_setting_mode: String,
     pub is_tv: bool,
+    pub is_powered_by_tv: bool,
     pub developer_enabled: bool,
     pub uptime_seconds: u64,
     pub wifi_driver: String,
     pub has_wifi_5g: bool,
+    pub wifi_mac: String,
+    pub bluetooth_mac: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -80,6 +93,7 @@ pub struct DeviceStats {
     pub cpu_history: Vec<f32>,
     pub ram_history: Vec<f32>,
     pub fps_history: Vec<f32>,
+    pub bandwidth_history: Vec<f32>,
     pub last_updated: Option<std::time::Instant>,
     pub is_loading: bool,
 }
@@ -100,6 +114,8 @@ pub enum BackgroundMessage {
         frame_rate: GraphicsFrameRateStats,
         bitmaps: R2D2BitmapsStats,
         sgnodes: SceneGraphNodesStats,
+        media_player: Option<MediaPlayerInfo>,
+        device_details: Option<DeviceDetails>,
     },
     PowerStateUpdated(bool),
     AppIconLoaded { id: String, image: egui::ColorImage },

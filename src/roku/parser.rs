@@ -58,16 +58,20 @@ pub fn parse_device_details_xml(xml: &str) -> DeviceDetails {
         model_name: extract("model-name"),
         model_number: extract("model-number"),
         software_version: extract("software-version"),
+        build_number: extract("build-number"),
         network_name: extract("network-name"),
         power_mode: extract("power-mode"),
         ui_resolution: extract("ui-resolution"),
         user_location: extract("user-device-location"),
         ecp_setting_mode: extract("ecp-setting-mode"),
         is_tv: extract("is-tv").eq_ignore_ascii_case("true"),
+        is_powered_by_tv: extract("is-powered-by-tv").eq_ignore_ascii_case("true"),
         developer_enabled: extract("developer-enabled").eq_ignore_ascii_case("true"),
         uptime_seconds: extract("uptime").parse::<u64>().unwrap_or(0),
         wifi_driver: extract("wifi-driver"),
         has_wifi_5g: extract("has-wifi-5G-support").eq_ignore_ascii_case("true"),
+        wifi_mac: extract("wifi-mac"),
+        bluetooth_mac: extract("bluetooth-mac"),
     }
 }
 
@@ -254,30 +258,132 @@ pub fn parse_sgnodes_xml(xml: &str) -> SceneGraphNodesStats {
 pub fn parse_media_player_xml(xml: &str) -> MediaPlayerInfo {
     let mut info = MediaPlayerInfo::default();
     
-    // Extract player state: <player state="play" ...>
-    if let Some(state_idx) = xml.find("state=\"") {
-        let after = &xml[state_idx + 7..];
-        if let Some(quote) = after.find('"') {
-            info.state = after[..quote].to_string();
-        }
-    }
-
-    // Extract plugin / app name: <plugin id="..." name="YouTube" />
-    if let Some(name_idx) = xml.find("name=\"") {
-        let after = &xml[name_idx + 6..];
-        if let Some(quote) = after.find('"') {
-            info.app_name = clean_html_entities(&after[..quote]);
-        }
-    }
-
-    // Extract position: <position>22961735 ms</position>
-    if let Some(pos_idx) = xml.find("<position>") {
-        let after = &xml[pos_idx + 10..];
-        if let Some(close) = after.find("</position>") {
-            let pos_str = after[..close].trim().trim_end_matches(" ms").trim();
-            if let Ok(ms) = pos_str.parse::<u64>() {
-                info.position_ms = Some(ms);
+    let extract_attr = |tag_name: &str, attr_name: &str| -> Option<String> {
+        let tag_open = format!("<{}", tag_name);
+        if let Some(tag_start) = xml.find(&tag_open) {
+            let after_tag = &xml[tag_start..];
+            if let Some(tag_end) = after_tag.find('>') {
+                let tag_slice = &after_tag[..tag_end];
+                let attr_pattern = format!(" {}=\"", attr_name);
+                if let Some(attr_idx) = tag_slice.find(&attr_pattern) {
+                    let val_start = attr_idx + attr_pattern.len();
+                    if let Some(quote_end) = tag_slice[val_start..].find('"') {
+                        return Some(clean_html_entities(&tag_slice[val_start..val_start + quote_end]));
+                    }
+                }
             }
+        }
+        None
+    };
+
+    let extract_tag = |tag: &str| -> Option<String> {
+        let open = format!("<{}>", tag);
+        let close = format!("</{}>", tag);
+        if let Some(start) = xml.find(&open) {
+            let s = start + open.len();
+            if let Some(end) = xml[s..].find(&close) {
+                return Some(clean_html_entities(xml[s..s + end].trim()));
+            }
+        }
+        None
+    };
+
+    // State: <player state="play" ...>
+    if let Some(state) = extract_attr("player", "state") {
+        info.state = state;
+    }
+
+    // App name: <plugin id="..." name="YouTube" />
+    if let Some(name) = extract_attr("plugin", "name") {
+        info.app_name = name;
+    }
+
+    // Bandwidth: <plugin ... bandwidth="97372298 bps" /> or bitrate in stream_segment
+    if let Some(bw_str) = extract_attr("plugin", "bandwidth") {
+        let cleaned = bw_str.trim().trim_end_matches(" bps").trim();
+        if let Ok(bps) = cleaned.parse::<u64>() {
+            info.bandwidth_bps = Some(bps);
+        }
+    }
+
+    // Video bitrate: <stream_segment ... bitrate="15136323" />
+    if let Some(br_str) = extract_attr("stream_segment", "bitrate") {
+        let cleaned = br_str.trim().trim_end_matches(" bps").trim();
+        if let Ok(bps) = cleaned.parse::<u64>() {
+            info.video_bitrate_bps = Some(bps);
+        }
+    }
+
+    // Resolution: from stream_segment width & height, or format video_res
+    let width = extract_attr("stream_segment", "width");
+    let height = extract_attr("stream_segment", "height");
+    if let (Some(w), Some(h)) = (width, height) {
+        let label = match (w.as_str(), h.as_str()) {
+            ("3840", "2160") => " (4K UHD)",
+            ("1920", "1080") => " (1080p FHD)",
+            ("1280", "720") => " (720p HD)",
+            _ => "",
+        };
+        info.video_res = format!("{}x{}{}", w, h, label);
+    } else if let Some(vres) = extract_attr("format", "video_res") {
+        info.video_res = vres;
+    }
+
+    // Video Codec: <format video="hevc_b" ...>
+    if let Some(vc) = extract_attr("format", "video") {
+        let friendly = match vc.to_lowercase().as_str() {
+            s if s.starts_with("hevc") => "HEVC (H.265 4K HDR)",
+            s if s.starts_with("av1") => "AV1 Next-Gen",
+            s if s.starts_with("vp9") => "VP9",
+            s if s.starts_with("mpeg4") || s.starts_with("h264") || s.starts_with("avc") => "H.264 / AVC",
+            _ => &vc,
+        };
+        info.video_codec = friendly.to_string();
+    }
+
+    // Audio Codec: <format audio="eac3" ...>
+    if let Some(ac) = extract_attr("format", "audio") {
+        let friendly = match ac.to_lowercase().as_str() {
+            "eac3" => "Dolby Digital Plus (E-AC-3)",
+            "ac3" => "Dolby Digital (AC-3)",
+            "aac" => "AAC Stereo",
+            "atmos" => "Dolby Atmos",
+            "dts" => "DTS Surround",
+            _ => &ac,
+        };
+        info.audio_codec = friendly.to_string();
+    }
+
+    // Container: <format container="dash" ...>
+    if let Some(cont) = extract_attr("format", "container") {
+        let friendly = match cont.to_lowercase().as_str() {
+            "dash" => "MPEG-DASH",
+            "hls" => "Apple HLS",
+            "mp4" => "MP4",
+            _ => &cont,
+        };
+        info.container = friendly.to_string();
+    }
+
+    // Buffering: <buffering target="0" max="1000" current="1000" />
+    if let Some(cur) = extract_attr("buffering", "current").and_then(|s| s.parse::<u32>().ok()) {
+        info.buffer_current = Some(cur);
+    }
+    if let Some(max) = extract_attr("buffering", "max").and_then(|s| s.parse::<u32>().ok()) {
+        info.buffer_max = Some(max);
+    }
+
+    // Position & Duration: <position>...</position> and <duration>...</duration>
+    if let Some(pos_str) = extract_tag("position") {
+        let cleaned = pos_str.trim().trim_end_matches(" ms").trim();
+        if let Ok(ms) = cleaned.parse::<u64>() {
+            info.position_ms = Some(ms);
+        }
+    }
+    if let Some(dur_str) = extract_tag("duration") {
+        let cleaned = dur_str.trim().trim_end_matches(" ms").trim();
+        if let Ok(ms) = cleaned.parse::<u64>() {
+            info.duration_ms = Some(ms);
         }
     }
 
@@ -358,11 +464,20 @@ mod tests {
 
     #[test]
     fn test_parse_media_player_xml() {
-        let sample = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?><player state=\"play\" error=\"false\"><plugin id=\"837\" name=\"YouTube\" /><format audio=\"aac\" video=\"av1\" /><position>22961735 ms</position></player>";
+        let sample = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?><player state=\"play\" error=\"false\"><plugin id=\"837\" name=\"YouTube\" bandwidth=\"97372298 bps\" /><format audio=\"eac3\" video=\"hevc_b\" container=\"dash\" /><buffering current=\"1000\" max=\"1000\" /><position>22961735 ms</position><duration>45000000 ms</duration><stream_segment bitrate=\"15136323\" width=\"3840\" height=\"2160\" /></player>";
         let info = parse_media_player_xml(sample);
         assert_eq!(info.state, "play");
         assert_eq!(info.app_name, "YouTube");
+        assert_eq!(info.bandwidth_bps, Some(97372298));
+        assert_eq!(info.video_bitrate_bps, Some(15136323));
+        assert_eq!(info.video_res, "3840x2160 (4K UHD)");
+        assert_eq!(info.video_codec, "HEVC (H.265 4K HDR)");
+        assert_eq!(info.audio_codec, "Dolby Digital Plus (E-AC-3)");
+        assert_eq!(info.container, "MPEG-DASH");
+        assert_eq!(info.buffer_current, Some(1000));
+        assert_eq!(info.buffer_max, Some(1000));
         assert_eq!(info.position_ms, Some(22961735));
+        assert_eq!(info.duration_ms, Some(45000000));
 
         let paused = "<player state=\"pause\"><plugin name=\"Netflix\" /><position>5000 ms</position></player>";
         let p_info = parse_media_player_xml(paused);
