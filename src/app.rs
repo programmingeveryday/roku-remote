@@ -513,108 +513,13 @@ impl RokuRemoteApp {
         });
     }
 
-    pub fn render_sparkline_graph(
-        &self,
-        ui: &mut egui::Ui,
-        title: &str,
-        current_val_str: &str,
-        history: &[f32],
-        max_bound: f32,
-        line_color: egui::Color32,
-        height: f32,
-    ) {
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new(title)
-                    .strong()
-                    .size(12.5)
-                    .color(self.theme.foreground),
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    egui::RichText::new(current_val_str)
-                        .strong()
-                        .size(13.0)
-                        .color(line_color),
-                );
-            });
-        });
-
-        let available_w = ui.available_width().max(160.0);
-        let (response, painter) = ui.allocate_painter(
-            egui::vec2(available_w, height),
-            egui::Sense::hover(),
-        );
-        let rect = response.rect;
-
-        painter.rect_filled(rect, 6.0, self.theme.lighter_background);
-        painter.rect_stroke(rect, 6.0, egui::Stroke::new(1.0_f32, self.theme.dark_background));
-
-        if history.is_empty() {
-            painter.text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "Awaiting Telemetry Samples...",
-                egui::FontId::proportional(11.0),
-                self.theme.dark_foreground,
-            );
-            return;
-        }
-
-        let grid_stroke = egui::Stroke::new(0.8_f32, self.theme.dark_background);
-        for fraction in [0.25f32, 0.5f32, 0.75f32] {
-            let y = rect.bottom() - (rect.height() * fraction);
-            painter.line_segment(
-                [egui::pos2(rect.left() + 4.0, y), egui::pos2(rect.right() - 4.0, y)],
-                grid_stroke,
-            );
-        }
-
-        let padding = 8.0f32;
-        let plot_w = (rect.width() - (padding * 2.0)).max(10.0);
-        let plot_h = (rect.height() - (padding * 2.0)).max(10.0);
-
-        let max_y = max_bound.max(history.iter().copied().fold(1.0f32, f32::max));
-        let n = history.len();
-        let dx = if n > 1 { plot_w / (n - 1) as f32 } else { plot_w };
-
-        let mut points: Vec<egui::Pos2> = Vec::with_capacity(n);
-        for (i, &val) in history.iter().enumerate() {
-            let norm_y = (val / max_y).clamp(0.0, 1.0);
-            let x = rect.left() + padding + (i as f32 * dx);
-            let y = rect.bottom() - padding - (norm_y * plot_h);
-            points.push(egui::pos2(x, y));
-        }
-
-        if points.len() >= 2 {
-            let mut poly = points.clone();
-            poly.push(egui::pos2(points.last().unwrap().x, rect.bottom() - padding));
-            poly.push(egui::pos2(points.first().unwrap().x, rect.bottom() - padding));
-
-            let fill_color = egui::Color32::from_rgba_premultiplied(
-                line_color.r() / 5,
-                line_color.g() / 5,
-                line_color.b() / 5,
-                40,
-            );
-            painter.add(egui::Shape::convex_polygon(poly, fill_color, egui::Stroke::NONE));
-
-            painter.add(egui::Shape::line(
-                points,
-                egui::Stroke::new(1.8f32, line_color),
-            ));
-        } else if let Some(&p) = points.first() {
-            painter.circle_filled(p, 3.5, line_color);
-        }
-    }
-
     pub fn render_device_stats_content(&mut self, ui: &mut egui::Ui, _content_width: f32) {
         ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
 
         // Header Row
         ui.horizontal(|ui| {
             ui.heading(
-                egui::RichText::new("📊 Roku Stats & Telemetry")
+                egui::RichText::new("📊 Roku Device & Stream Stats")
                     .color(self.theme.foreground)
                     .size(16.0),
             );
@@ -635,113 +540,118 @@ impl RokuRemoteApp {
         });
 
         ui.separator();
+        ui.add_space(2.0);
 
-        // Running App & Target Device Banner
+        // Section 1: Target Device & Current Status Card
         egui::Frame::none()
             .fill(self.theme.lighter_background)
             .rounding(6.0)
-            .inner_margin(egui::Margin::symmetric(10.0, 6.0))
+            .inner_margin(egui::Margin::symmetric(12.0, 10.0))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Target:").strong().size(12.0).color(self.theme.accent));
-                    ui.label(egui::RichText::new(&self.device_name).size(12.0).color(self.theme.foreground));
-                    ui.label(egui::RichText::new(format!("({})", self.selected_device_ip)).size(11.0).color(self.theme.dark_foreground));
+                ui.label(egui::RichText::new("📺 Device & Application").strong().size(12.5).color(self.theme.accent));
+                ui.add_space(4.0);
+                egui::Grid::new("stats_device_status_grid")
+                    .spacing([14.0, 6.0])
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("Target Device:").strong().size(11.5).color(self.theme.accent));
+                        ui.label(egui::RichText::new(format!("{} ({})", self.device_name, self.selected_device_ip)).size(11.5).color(self.theme.foreground));
+                        ui.end_row();
 
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let state_str = match self.media_player.state.as_str() {
-                            "play" => "▶ Playing",
-                            "pause" => "⏸ Paused",
-                            "buffer" => "⏳ Buffering",
-                            _ => "⏹ Idle",
-                        };
-                        let state_color = match self.media_player.state.as_str() {
-                            "play" => egui::Color32::from_rgb(46, 204, 113),
-                            "pause" => egui::Color32::from_rgb(241, 196, 15),
-                            "buffer" => egui::Color32::from_rgb(52, 152, 219),
-                            _ => self.theme.dark_foreground,
+                        ui.label(egui::RichText::new("Active App:").strong().size(11.5).color(self.theme.accent));
+                        let app_display = if self.active_app.is_empty() { "Home / System".to_string() } else { self.active_app.clone() };
+                        ui.label(egui::RichText::new(app_display).size(11.5).color(self.theme.foreground));
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Playback State:").strong().size(11.5).color(self.theme.accent));
+                        let (state_str, state_color) = match self.media_player.state.as_str() {
+                            "play" => ("▶ Playing", egui::Color32::from_rgb(46, 204, 113)),
+                            "pause" => ("⏸ Paused", egui::Color32::from_rgb(241, 196, 15)),
+                            "buffer" => ("⏳ Buffering", egui::Color32::from_rgb(52, 152, 219)),
+                            _ => ("⏹ Idle", self.theme.dark_foreground),
                         };
                         ui.label(egui::RichText::new(state_str).strong().size(11.5).color(state_color));
-
-                        let app_display = if self.active_app.is_empty() { "Home / System" } else { &self.active_app };
-                        ui.label(egui::RichText::new(app_display).strong().size(12.0).color(self.theme.accent));
-                        ui.label(egui::RichText::new("App:").size(12.0).color(self.theme.foreground));
+                        ui.end_row();
                     });
-                });
             });
-
-        ui.add_space(2.0);
-
-        // 1. PRIMARY LIVE GRAPH: Network Streaming Bandwidth (Mbps)
-        let latest_mbps = self.device_stats.bandwidth_history.last().copied().unwrap_or(0.0);
-        let bw_val_str = if latest_mbps > 0.0 {
-            if let Some(bps) = self.media_player.video_bitrate_bps {
-                let v_mbps = (bps as f32) / 1_000_000.0;
-                format!("{:.1} Mbps (video: {:.1} Mbps)", latest_mbps, v_mbps)
-            } else {
-                format!("{:.1} Mbps", latest_mbps)
-            }
-        } else if self.media_player.state == "play" || self.media_player.state == "pause" {
-            "Active (Measuring...)".to_string()
-        } else {
-            "0.0 Mbps (Idle / No Stream)".to_string()
-        };
-
-        let max_bw = self.device_stats.bandwidth_history.iter().copied().fold(50.0f32, f32::max).max(20.0);
-        self.render_sparkline_graph(
-            ui,
-            "📡 Network Streaming Bandwidth",
-            &bw_val_str,
-            &self.device_stats.bandwidth_history,
-            max_bw,
-            egui::Color32::from_rgb(52, 152, 219),
-            65.0,
-        );
 
         ui.add_space(4.0);
 
-        // 2. Active Media Stream Telemetry (if video/audio is active)
-        let has_stream_info = !self.media_player.video_res.is_empty()
+        // Section 2: Live Media Stream Telemetry Card (Bandwidth, Codecs, Buffer, Resolution)
+        let has_stream = !self.media_player.video_res.is_empty()
             || !self.media_player.video_codec.is_empty()
             || !self.media_player.audio_codec.is_empty()
-            || self.media_player.bandwidth_bps.is_some();
+            || self.media_player.bandwidth_bps.is_some()
+            || self.media_player.state == "play"
+            || self.media_player.state == "pause";
 
-        if has_stream_info {
-            egui::Frame::none()
-                .fill(self.theme.lighter_background)
-                .rounding(6.0)
-                .inner_margin(egui::Margin::symmetric(10.0, 8.0))
-                .show(ui, |ui| {
-                    ui.label(egui::RichText::new("🎬 Live Stream Telemetry").strong().size(12.0).color(self.theme.accent));
-                    ui.add_space(3.0);
-                    egui::Grid::new("stream_telemetry_grid")
-                        .spacing([12.0, 5.0])
+        egui::Frame::none()
+            .fill(self.theme.lighter_background)
+            .rounding(6.0)
+            .inner_margin(egui::Margin::symmetric(12.0, 10.0))
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("📡 Live Media Stream Telemetry").strong().size(12.5).color(self.theme.accent));
+                ui.add_space(4.0);
+
+                if !has_stream {
+                    ui.label(egui::RichText::new("No active media stream currently playing. Launch a channel to see real-time streaming bandwidth and codec metrics.").size(11.0).color(self.theme.dark_foreground));
+                } else {
+                    egui::Grid::new("stats_stream_grid")
+                        .spacing([14.0, 6.0])
                         .show(ui, |ui| {
+                            // Bandwidth
+                            ui.label(egui::RichText::new("Stream Bandwidth:").strong().size(11.5).color(self.theme.accent));
+                            let bw_str = if let Some(bps) = self.media_player.bandwidth_bps {
+                                format!("{:.1} Mbps ({} bps)", (bps as f32) / 1_000_000.0, bps)
+                            } else {
+                                "Measuring...".to_string()
+                            };
+                            ui.label(egui::RichText::new(bw_str).strong().size(11.5).color(self.theme.foreground));
+                            ui.end_row();
+
+                            // Video Bitrate
+                            if let Some(bps) = self.media_player.video_bitrate_bps {
+                                ui.label(egui::RichText::new("Video Bitrate:").strong().size(11.5).color(self.theme.accent));
+                                ui.label(egui::RichText::new(format!("{:.1} Mbps", (bps as f32) / 1_000_000.0)).size(11.5).color(self.theme.foreground));
+                                ui.end_row();
+                            }
+
+                            // Resolution
                             if !self.media_player.video_res.is_empty() {
                                 ui.label(egui::RichText::new("Stream Resolution:").strong().size(11.5).color(self.theme.accent));
                                 ui.label(egui::RichText::new(&self.media_player.video_res).size(11.5).color(self.theme.foreground));
                                 ui.end_row();
                             }
+
+                            // Video Codec
                             if !self.media_player.video_codec.is_empty() {
                                 ui.label(egui::RichText::new("Video Codec:").strong().size(11.5).color(self.theme.accent));
                                 ui.label(egui::RichText::new(&self.media_player.video_codec).size(11.5).color(self.theme.foreground));
                                 ui.end_row();
                             }
+
+                            // Audio Codec
                             if !self.media_player.audio_codec.is_empty() {
                                 ui.label(egui::RichText::new("Audio Codec:").strong().size(11.5).color(self.theme.accent));
                                 ui.label(egui::RichText::new(&self.media_player.audio_codec).size(11.5).color(self.theme.foreground));
                                 ui.end_row();
                             }
+
+                            // Container
                             if !self.media_player.container.is_empty() {
                                 ui.label(egui::RichText::new("Container / Protocol:").strong().size(11.5).color(self.theme.accent));
                                 ui.label(egui::RichText::new(&self.media_player.container).size(11.5).color(self.theme.foreground));
                                 ui.end_row();
                             }
+
+                            // Buffer Health
                             if let (Some(cur), Some(max)) = (self.media_player.buffer_current, self.media_player.buffer_max) {
                                 ui.label(egui::RichText::new("Buffer Health:").strong().size(11.5).color(self.theme.accent));
                                 let pct = if max > 0 { (cur as f32 / max as f32) * 100.0 } else { 100.0 };
                                 ui.label(egui::RichText::new(format!("{:.0}% full ({}/{} ms)", pct, cur, max)).size(11.5).color(self.theme.foreground));
                                 ui.end_row();
                             }
+
+                            // Playback Progress
                             if let (Some(pos), Some(dur)) = (self.media_player.position_ms, self.media_player.duration_ms) {
                                 if dur > 0 {
                                     let pos_s = pos / 1000;
@@ -753,20 +663,21 @@ impl RokuRemoteApp {
                                 }
                             }
                         });
-                });
-            ui.add_space(4.0);
-        }
+                }
+            });
 
-        // 3. Hardware & System Diagnostics
+        ui.add_space(4.0);
+
+        // Section 3: Hardware & System Diagnostics Card
         egui::Frame::none()
             .fill(self.theme.lighter_background)
             .rounding(6.0)
-            .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+            .inner_margin(egui::Margin::symmetric(12.0, 10.0))
             .show(ui, |ui| {
-                ui.label(egui::RichText::new("⚙ Hardware & System Diagnostics").strong().size(12.0).color(self.theme.accent));
-                ui.add_space(3.0);
+                ui.label(egui::RichText::new("⚙ Hardware & System Diagnostics").strong().size(12.5).color(self.theme.accent));
+                ui.add_space(4.0);
                 egui::Grid::new("stats_hardware_grid")
-                    .spacing([12.0, 5.0])
+                    .spacing([14.0, 6.0])
                     .show(ui, |ui| {
                         // System Uptime
                         ui.label(egui::RichText::new("System Uptime:").strong().size(11.5).color(self.theme.accent));
@@ -801,16 +712,23 @@ impl RokuRemoteApp {
 
                         // Wi-Fi Hardware
                         ui.label(egui::RichText::new("Wi-Fi Hardware:").strong().size(11.5).color(self.theme.accent));
-                        let wifi_str = format!("Driver: {} (5GHz Band: {})", 
+                        let wifi_str = format!("Driver: {} (5GHz: {})", 
                             if self.device_details.wifi_driver.is_empty() { "standard" } else { &self.device_details.wifi_driver },
                             if self.device_details.has_wifi_5g { "Supported" } else { "No" }
                         );
                         ui.label(egui::RichText::new(wifi_str).size(11.5).color(self.theme.foreground));
                         ui.end_row();
 
+                        // Network Name
+                        if !self.device_details.network_name.is_empty() {
+                            ui.label(egui::RichText::new("Network Name:").strong().size(11.5).color(self.theme.accent));
+                            ui.label(egui::RichText::new(&self.device_details.network_name).size(11.5).color(self.theme.foreground));
+                            ui.end_row();
+                        }
+
                         // MAC Addresses
                         if !self.device_details.wifi_mac.is_empty() {
-                            ui.label(egui::RichText::new("MAC Address:").strong().size(11.5).color(self.theme.accent));
+                            ui.label(egui::RichText::new("MAC Addresses:").strong().size(11.5).color(self.theme.accent));
                             let mac_str = if !self.device_details.bluetooth_mac.is_empty() {
                                 format!("Wi-Fi: {} | BT: {}", self.device_details.wifi_mac, self.device_details.bluetooth_mac)
                             } else {
@@ -827,80 +745,43 @@ impl RokuRemoteApp {
                             ui.label(egui::RichText::new(build_str).size(11.5).color(self.theme.foreground));
                             ui.end_row();
                         }
+
+                        // Developer Mode stats (if active)
+                        if self.device_details.developer_enabled {
+                            if let Some(cp) = &self.device_stats.chanperf {
+                                if cp.status == "OK" {
+                                    ui.label(egui::RichText::new("CPU Utilization:").strong().size(11.5).color(self.theme.accent));
+                                    ui.label(egui::RichText::new(format!("{:.1}% (usr: {:.1}%, sys: {:.1}%)", cp.cpu_percent, cp.user_cpu_percent, cp.sys_cpu_percent)).size(11.5).color(self.theme.foreground));
+                                    ui.end_row();
+
+                                    ui.label(egui::RichText::new("RAM Footprint:").strong().size(11.5).color(self.theme.accent));
+                                    ui.label(egui::RichText::new(format!("{:.1} MB", cp.memory_mb)).size(11.5).color(self.theme.foreground));
+                                    ui.end_row();
+                                }
+                            }
+                            if let Some(fr) = &self.device_stats.frame_rate {
+                                if fr.status == "OK" && fr.fps > 0.0 {
+                                    ui.label(egui::RichText::new("Graphics Frame Rate:").strong().size(11.5).color(self.theme.accent));
+                                    ui.label(egui::RichText::new(format!("{:.1} FPS", fr.fps)).size(11.5).color(self.theme.foreground));
+                                    ui.end_row();
+                                }
+                            }
+                        }
                     });
             });
 
         ui.add_space(4.0);
 
-        // 4. Developer Mode CPU & RAM Profiling
-        if self.device_details.developer_enabled {
-            // DEVELOPER MODE IS ACTIVE: Show live CPU and RAM graphs!
-            let cpu_val_str = self.device_stats.chanperf.as_ref().map_or_else(
-                || if self.device_stats.cpu_history.is_empty() { "— %".to_string() } else { format!("{:.1}%", self.device_stats.cpu_history.last().unwrap()) },
-                |cp| format!("{:.1}% (usr: {:.1}%, sys: {:.1}%)", cp.cpu_percent, cp.user_cpu_percent, cp.sys_cpu_percent),
-            );
-            self.render_sparkline_graph(
-                ui,
-                "⚡ CPU Utilization",
-                &cpu_val_str,
-                &self.device_stats.cpu_history,
-                100.0,
-                egui::Color32::from_rgb(46, 204, 113),
-                65.0,
-            );
-
-            ui.add_space(4.0);
-
-            let ram_val_str = self.device_stats.chanperf.as_ref().map_or_else(
-                || if self.device_stats.ram_history.is_empty() { "— MB".to_string() } else { format!("{:.1} MB", self.device_stats.ram_history.last().unwrap()) },
-                |cp| format!("{:.1} MB", cp.memory_mb),
-            );
-            self.render_sparkline_graph(
-                ui,
-                "💾 RAM Memory Footprint",
-                &ram_val_str,
-                &self.device_stats.ram_history,
-                128.0,
-                self.theme.roku_purple,
-                65.0,
-            );
-        } else {
-            // DEVELOPER MODE IS DISABLED: Explain clearly why and how to enable via physical remote
-            egui::Frame::none()
-                .fill(self.theme.lighter_background)
-                .rounding(6.0)
-                .inner_margin(egui::Margin::symmetric(10.0, 8.0))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("ℹ").size(15.0).color(self.theme.accent));
-                        ui.vertical(|ui| {
-                            ui.label(
-                                egui::RichText::new("Optional: Internal CPU & RAM Profiling")
-                                    .strong()
-                                    .size(12.0)
-                                    .color(self.theme.accent),
-                            );
-                            ui.label(
-                                egui::RichText::new("Roku OS restricts internal hardware CPU, RAM, and FPS profiling to Developer Mode. Because Roku blocks secret codes over Wi-Fi for security, it must be enabled using your physical Roku remote:")
-                                    .size(11.0)
-                                    .color(self.theme.foreground),
-                            );
-                            ui.add_space(2.0);
-                            ui.label(
-                                egui::RichText::new("1. On your physical Roku remote, press: Home (3x) > Up (2x) > Right > Left > Right > Left > Right\n2. The 'Developer Settings' screen will appear on your TV.\n3. Choose 'Enable installer and restart', set a password, and allow Roku to reboot.")
-                                    .size(11.0)
-                                    .color(self.theme.dark_foreground),
-                            );
-                            ui.add_space(1.0);
-                            ui.label(
-                                egui::RichText::new("Once enabled, live CPU % and RAM MB graphs will automatically activate here.")
-                                    .size(10.5)
-                                    .italics()
-                                    .color(self.theme.dark_foreground),
-                            );
-                        });
-                    });
-                });
+        // Section 4: Developer Mode Note (compact & subtle)
+        if !self.device_details.developer_enabled {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("💡").size(12.0));
+                ui.label(
+                    egui::RichText::new("Raw chip CPU/RAM profiling is restricted by Roku to Developer Mode (enabled on TV with physical remote).")
+                        .size(10.5)
+                        .color(self.theme.dark_foreground),
+                );
+            });
         }
     }
 
@@ -2823,16 +2704,21 @@ impl eframe::App for RokuRemoteApp {
                     });
             }
 
-            // Roku Stats & Performance Modal Window
+            // Roku Device & Stream Stats Modal Window
             if self.show_device_stats {
-                egui::Window::new("📊 Roku Stats & Performance")
+                let modal_w = 480.0f32.min(max_modal_w);
+                egui::Window::new("📊 Roku Device & Stream Stats")
                     .collapsible(false)
-                    .resizable(false)
+                    .resizable(true)
                     .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-                    .default_width(390.0)
-                    .max_width(max_modal_w.max(390.0))
+                    .default_width(modal_w)
+                    .max_width(max_modal_w)
                     .show(ctx, |ui| {
-                        self.render_device_stats_content(ui, 380.0);
+                        egui::ScrollArea::vertical()
+                            .max_height((ui.ctx().screen_rect().height() - 90.0).max(250.0))
+                            .show(ui, |ui| {
+                                self.render_device_stats_content(ui, modal_w);
+                            });
                     });
             }
 
