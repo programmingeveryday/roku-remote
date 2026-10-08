@@ -6,8 +6,9 @@ use std::time::{Duration, Instant};
 
 use crate::models::{BackgroundMessage, RokuDevice};
 use crate::roku::parser::{
-    clean_html_entities, parse_active_app_xml, parse_apps_xml, parse_device_details_xml,
-    parse_device_name_xml, parse_media_player_xml,
+    clean_html_entities, parse_active_app_xml, parse_apps_xml, parse_chanperf_xml,
+    parse_device_details_xml, parse_device_name_xml, parse_graphics_frame_rate_xml,
+    parse_media_player_xml, parse_r2d2_bitmaps_xml, parse_sgnodes_xml,
 };
 
 fn get_local_subnet_base() -> Option<(u8, u8, u8)> {
@@ -343,6 +344,46 @@ pub fn save_cached_last_ip(ip: &str) {
         let cache_file = get_icon_cache_dir().join("last_ip.txt");
         let _ = std::fs::write(cache_file, ip);
     }
+}
+
+pub fn fetch_device_stats_worker(
+    ip: &str,
+    tx: &Sender<BackgroundMessage>,
+    ctx: &egui::Context,
+) {
+    if ip.is_empty() {
+        return;
+    }
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_millis(1500))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let get_xml = |endpoint: &str| -> String {
+        let url = format!("http://{}:8060/query/{}", ip, endpoint);
+        client.get(&url).send().ok().and_then(|r| r.text().ok()).unwrap_or_default()
+    };
+
+    let chanperf_xml = get_xml("chanperf");
+    let fps_xml = get_xml("graphics-frame-rate");
+    let bitmaps_xml = get_xml("r2d2-bitmaps");
+    let sgnodes_xml = get_xml("sgnodes/roots");
+
+    let chanperf = parse_chanperf_xml(&chanperf_xml);
+    let frame_rate = parse_graphics_frame_rate_xml(&fps_xml);
+    let bitmaps = parse_r2d2_bitmaps_xml(&bitmaps_xml);
+    let sgnodes = parse_sgnodes_xml(&sgnodes_xml);
+
+    let _ = tx.send(BackgroundMessage::DeviceStatsUpdated {
+        chanperf,
+        frame_rate,
+        bitmaps,
+        sgnodes,
+    });
+    ctx.request_repaint();
 }
 
 /// Encodes a character for the Roku ECP `/keypress/Lit_<char>` command.

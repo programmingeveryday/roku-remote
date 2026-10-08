@@ -30,6 +30,58 @@ pub struct DeviceDetails {
     pub user_location: String,
     pub ecp_setting_mode: String,
     pub is_tv: bool,
+    pub developer_enabled: bool,
+    pub uptime_seconds: u64,
+    pub wifi_driver: String,
+    pub has_wifi_5g: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ChanPerfStats {
+    pub timestamp_ms: u64,
+    pub cpu_percent: f32,
+    pub user_cpu_percent: f32,
+    pub sys_cpu_percent: f32,
+    pub memory_bytes: u64,
+    pub memory_mb: f32,
+    pub status: String,
+    pub error_msg: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct GraphicsFrameRateStats {
+    pub fps: f32,
+    pub status: String,
+    pub error_msg: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct R2D2BitmapsStats {
+    pub texture_count: usize,
+    pub total_memory_bytes: u64,
+    pub status: String,
+    pub error_msg: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SceneGraphNodesStats {
+    pub root_count: usize,
+    pub total_nodes: usize,
+    pub status: String,
+    pub error_msg: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct DeviceStats {
+    pub chanperf: Option<ChanPerfStats>,
+    pub frame_rate: Option<GraphicsFrameRateStats>,
+    pub bitmaps: Option<R2D2BitmapsStats>,
+    pub sgnodes: Option<SceneGraphNodesStats>,
+    pub cpu_history: Vec<f32>,
+    pub ram_history: Vec<f32>,
+    pub fps_history: Vec<f32>,
+    pub last_updated: Option<std::time::Instant>,
+    pub is_loading: bool,
 }
 
 pub enum BackgroundMessage {
@@ -43,6 +95,12 @@ pub enum BackgroundMessage {
     ThemeUpdated(crate::theme::ThemeColors),
     MediaPlayerUpdated(MediaPlayerInfo),
     DeviceDetailsUpdated(DeviceDetails),
+    DeviceStatsUpdated {
+        chanperf: ChanPerfStats,
+        frame_rate: GraphicsFrameRateStats,
+        bitmaps: R2D2BitmapsStats,
+        sgnodes: SceneGraphNodesStats,
+    },
     PowerStateUpdated(bool),
     AppIconLoaded { id: String, image: egui::ColorImage },
 }

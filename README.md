@@ -48,8 +48,13 @@ A modern, fast, lightweight, and cross-platform native desktop remote control fo
   - Global navigation shortcuts are paused while the Live Keyboard is active so you can freely type words without triggering TV actions. Press `Esc` to close.
 - **Omarchy / System Desktop Theme Integration**:
   - Automatically detects and matches Omarchy system themes (`colors.toml`) with live hot-reloading.
-- **Device Details View**:
-  - Inspect model name, model number, software version, Wi-Fi network, UI resolution, power mode, IP address, and live/sleeping App Status.
+- **Device Details & Telemetry View**:
+  - Inspect model name, model number, software version, Wi-Fi network & driver, UI resolution, power mode, IP address, and live/sleeping App Status.
+- **Real-Time Performance & Stats Dashboard (`📊 Stats`)**:
+  - Accessible directly under Device Details (`[ 📊 Stats ]`), available in both wide modal and compact narrow views.
+  - **Live Sparkline Graphs**: Visualizes real-time CPU utilization (`%`, user vs system breakdown) and RAM memory footprint (`MB`) with gradient filled charts.
+  - **Graphics & SceneGraph Telemetry**: Displays rendered graphics frame rate (`FPS`), active SceneGraph root & node count (`/query/sgnodes`), texture memory & VRAM bitmap allocations (`/query/r2d2-bitmaps`), system uptime, and Wi-Fi 5GHz status.
+  - **Automatic Developer Mode Assistance**: Automatically detects if Developer Mode is disabled on the Roku and offers a one-click button (`[ 🎮 Send Secret Sequence to Roku Remote ]`) to transmit the secret remote sequence (`Home x3, Up x2, Right, Left, Right, Left, Right`) directly to your Roku.
 - **Modular & Idiomatic Rust Architecture**:
   - Refactored into clean modules (`app`, `models`, `roku::client`, `roku::parser`, `theme`) with 100% unit test coverage for XML parsers and color utilities.
 

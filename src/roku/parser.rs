@@ -1,4 +1,7 @@
-use crate::models::{AppItem, DeviceDetails, MediaPlayerInfo};
+use crate::models::{
+    AppItem, ChanPerfStats, DeviceDetails, GraphicsFrameRateStats, MediaPlayerInfo,
+    R2D2BitmapsStats, SceneGraphNodesStats,
+};
 
 pub fn clean_html_entities(s: &str) -> String {
     s.replace("&amp;", "&")
@@ -61,6 +64,190 @@ pub fn parse_device_details_xml(xml: &str) -> DeviceDetails {
         user_location: extract("user-device-location"),
         ecp_setting_mode: extract("ecp-setting-mode"),
         is_tv: extract("is-tv").eq_ignore_ascii_case("true"),
+        developer_enabled: extract("developer-enabled").eq_ignore_ascii_case("true"),
+        uptime_seconds: extract("uptime").parse::<u64>().unwrap_or(0),
+        wifi_driver: extract("wifi-driver"),
+        has_wifi_5g: extract("has-wifi-5G-support").eq_ignore_ascii_case("true"),
+    }
+}
+
+pub fn parse_chanperf_xml(xml: &str) -> ChanPerfStats {
+    let extract = |tag: &str| -> String {
+        let open = format!("<{}>", tag);
+        let close = format!("</{}>", tag);
+        if let Some(start) = xml.find(&open) {
+            let s = start + open.len();
+            if let Some(end) = xml[s..].find(&close) {
+                return clean_html_entities(xml[s..s + end].trim());
+            }
+        }
+        String::new()
+    };
+
+    let status = extract("status");
+    let error_msg = extract("error");
+    if status.eq_ignore_ascii_case("FAILED") || !error_msg.is_empty() {
+        return ChanPerfStats {
+            status: if status.is_empty() { "FAILED".to_string() } else { status },
+            error_msg,
+            ..Default::default()
+        };
+    }
+
+    let timestamp_ms = extract("timestamp").parse::<u64>().unwrap_or(0);
+    let user_cpu = extract("user").parse::<f32>()
+        .or_else(|_| extract("user-cpu-percent").parse::<f32>())
+        .unwrap_or(0.0);
+    let sys_cpu = extract("sys").parse::<f32>()
+        .or_else(|_| extract("sys-cpu-percent").parse::<f32>())
+        .unwrap_or(0.0);
+    let cpu_load = extract("cpu-load").parse::<f32>()
+        .or_else(|_| extract("cpu-percent").parse::<f32>())
+        .or_else(|_| extract("cpu").parse::<f32>())
+        .unwrap_or(0.0);
+    let cpu_percent = if user_cpu > 0.0 || sys_cpu > 0.0 {
+        user_cpu + sys_cpu
+    } else {
+        cpu_load
+    };
+
+    let mem_bytes = extract("memory-bytes").parse::<u64>()
+        .or_else(|_| extract("ram-used").parse::<u64>())
+        .or_else(|_| extract("used").parse::<u64>())
+        .or_else(|_| extract("memory").parse::<u64>())
+        .unwrap_or(0);
+    let memory_mb = (mem_bytes as f32) / (1024.0 * 1024.0);
+
+    ChanPerfStats {
+        timestamp_ms,
+        cpu_percent,
+        user_cpu_percent: user_cpu,
+        sys_cpu_percent: sys_cpu,
+        memory_bytes: mem_bytes,
+        memory_mb,
+        status: if status.is_empty() { "OK".to_string() } else { status },
+        error_msg: String::new(),
+    }
+}
+
+pub fn parse_graphics_frame_rate_xml(xml: &str) -> GraphicsFrameRateStats {
+    let extract = |tag: &str| -> String {
+        let open = format!("<{}>", tag);
+        let close = format!("</{}>", tag);
+        if let Some(start) = xml.find(&open) {
+            let s = start + open.len();
+            if let Some(end) = xml[s..].find(&close) {
+                return clean_html_entities(xml[s..s + end].trim());
+            }
+        }
+        String::new()
+    };
+
+    let status = extract("status");
+    let error_msg = extract("error");
+    if status.eq_ignore_ascii_case("FAILED") || !error_msg.is_empty() {
+        return GraphicsFrameRateStats {
+            fps: 0.0,
+            status: if status.is_empty() { "FAILED".to_string() } else { status },
+            error_msg,
+        };
+    }
+
+    let fps = extract("frame-rate").parse::<f32>()
+        .or_else(|_| extract("fps").parse::<f32>())
+        .or_else(|_| extract("rate").parse::<f32>())
+        .unwrap_or(60.0);
+
+    GraphicsFrameRateStats {
+        fps,
+        status: if status.is_empty() { "OK".to_string() } else { status },
+        error_msg: String::new(),
+    }
+}
+
+pub fn parse_r2d2_bitmaps_xml(xml: &str) -> R2D2BitmapsStats {
+    let extract = |tag: &str| -> String {
+        let open = format!("<{}>", tag);
+        let close = format!("</{}>", tag);
+        if let Some(start) = xml.find(&open) {
+            let s = start + open.len();
+            if let Some(end) = xml[s..].find(&close) {
+                return clean_html_entities(xml[s..s + end].trim());
+            }
+        }
+        String::new()
+    };
+
+    let status = extract("status");
+    let error_msg = extract("error");
+    if status.eq_ignore_ascii_case("FAILED") || !error_msg.is_empty() {
+        return R2D2BitmapsStats {
+            status: if status.is_empty() { "FAILED".to_string() } else { status },
+            error_msg,
+            ..Default::default()
+        };
+    }
+
+    let count = xml.matches("<bitmap").count() + xml.matches("<texture").count();
+    let mem_bytes = extract("total-memory").parse::<u64>()
+        .or_else(|_| extract("memory-bytes").parse::<u64>())
+        .or_else(|_| extract("total-size").parse::<u64>())
+        .unwrap_or_else(|_| {
+            let mut total = 0u64;
+            let mut rest = xml;
+            while let Some(start) = rest.find("<size>") {
+                let s = start + 6;
+                if let Some(end) = rest[s..].find("</size>") {
+                    if let Ok(bytes) = rest[s..s + end].trim().parse::<u64>() {
+                        total += bytes;
+                    }
+                    rest = &rest[s + end + 7..];
+                } else {
+                    break;
+                }
+            }
+            total
+        });
+
+    R2D2BitmapsStats {
+        texture_count: count,
+        total_memory_bytes: mem_bytes,
+        status: if status.is_empty() { "OK".to_string() } else { status },
+        error_msg: String::new(),
+    }
+}
+
+pub fn parse_sgnodes_xml(xml: &str) -> SceneGraphNodesStats {
+    let extract = |tag: &str| -> String {
+        let open = format!("<{}>", tag);
+        let close = format!("</{}>", tag);
+        if let Some(start) = xml.find(&open) {
+            let s = start + open.len();
+            if let Some(end) = xml[s..].find(&close) {
+                return clean_html_entities(xml[s..s + end].trim());
+            }
+        }
+        String::new()
+    };
+
+    let status = extract("status");
+    let error_msg = extract("error");
+    if status.eq_ignore_ascii_case("FAILED") || !error_msg.is_empty() {
+        return SceneGraphNodesStats {
+            status: if status.is_empty() { "FAILED".to_string() } else { status },
+            error_msg,
+            ..Default::default()
+        };
+    }
+
+    let root_count = xml.matches("<root").count();
+    let total_nodes = xml.matches("<node").count();
+
+    SceneGraphNodesStats {
+        root_count,
+        total_nodes,
+        status: if status.is_empty() { "OK".to_string() } else { status },
+        error_msg: String::new(),
     }
 }
 
@@ -197,5 +384,46 @@ mod tests {
         assert_eq!(details.user_location, "Living room");
         assert_eq!(details.ecp_setting_mode, "limited");
         assert_eq!(details.is_tv, false);
+    }
+
+    #[test]
+    fn test_parse_chanperf_xml() {
+        let ok_sample = "<chanperf><status>OK</status><cpu-percent>12.5</cpu-percent><user-cpu-percent>8.0</user-cpu-percent><sys-cpu-percent>4.5</sys-cpu-percent><memory-bytes>67108864</memory-bytes></chanperf>";
+        let res = parse_chanperf_xml(ok_sample);
+        assert_eq!(res.status, "OK");
+        assert_eq!(res.cpu_percent, 12.5);
+        assert_eq!(res.user_cpu_percent, 8.0);
+        assert_eq!(res.sys_cpu_percent, 4.5);
+        assert_eq!(res.memory_mb, 64.0);
+
+        let failed_sample = "<chanperf><status>FAILED</status><error>Development Application installer is not enabled.</error></chanperf>";
+        let res_failed = parse_chanperf_xml(failed_sample);
+        assert_eq!(res_failed.status, "FAILED");
+        assert_eq!(res_failed.error_msg, "Development Application installer is not enabled.");
+    }
+
+    #[test]
+    fn test_parse_graphics_frame_rate_xml() {
+        let sample = "<graphics-frame-rate><status>OK</status><fps>59.94</fps></graphics-frame-rate>";
+        let res = parse_graphics_frame_rate_xml(sample);
+        assert_eq!(res.status, "OK");
+        assert!((res.fps - 59.94).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_parse_r2d2_bitmaps_xml() {
+        let sample = "<r2d2-bitmaps><status>OK</status><bitmap><size>1048576</size></bitmap><bitmap><size>2097152</size></bitmap></r2d2-bitmaps>";
+        let res = parse_r2d2_bitmaps_xml(sample);
+        assert_eq!(res.status, "OK");
+        assert_eq!(res.texture_count, 2);
+        assert_eq!(res.total_memory_bytes, 3145728);
+    }
+
+    #[test]
+    fn test_parse_sgnodes_xml() {
+        let sample = "<sgnodes><status>OK</status><root><node/><node/></root><root><node/></root></sgnodes>";
+        let res = parse_sgnodes_xml(sample);
+        assert_eq!(res.status, "OK");
+        assert_eq!(res.root_count, 2);
     }
 }

@@ -6,11 +6,12 @@ use std::thread;
 use std::time::Duration;
 
 use crate::models::{
-    AppItem, BackgroundMessage, DeviceDetails, LiveKeyCommand, MediaPlayerInfo, RokuDevice,
+    AppItem, BackgroundMessage, DeviceDetails, DeviceStats, LiveKeyCommand, MediaPlayerInfo,
+    RokuDevice,
 };
 use crate::roku::client::{
-    load_app_icon_worker, refresh_apps_worker, start_scan, update_active_app_worker,
-    update_device_name_worker, update_media_player_worker,
+    fetch_device_stats_worker, load_app_icon_worker, refresh_apps_worker, start_scan,
+    update_active_app_worker, update_device_name_worker, update_media_player_worker,
 };
 use crate::theme::{apply_theme, load_omarchy_theme, start_theme_watcher, ThemeColors};
 
@@ -30,6 +31,7 @@ pub struct RokuRemoteApp {
     pub is_device_reachable: bool,
     pub tv_powered_on: Arc<AtomicBool>,
     pub show_device_info: bool,
+    pub show_device_stats: bool,
     pub show_setup_guide: bool,
     pub manual_ip_mode: bool,
     pub apps: Vec<AppItem>,
@@ -45,6 +47,7 @@ pub struct RokuRemoteApp {
     pub focus_text_input: bool,
     pub text_entry: String,
     pub live_key_tx: Sender<LiveKeyCommand>,
+    pub device_stats: DeviceStats,
     pub theme: ThemeColors,
     pub ctx: egui::Context,
     pub rx: Receiver<BackgroundMessage>,
@@ -133,6 +136,7 @@ impl RokuRemoteApp {
             is_device_reachable: false,
             tv_powered_on: Arc::new(AtomicBool::new(true)),
             show_device_info: false,
+            show_device_stats: false,
             show_setup_guide: false,
             manual_ip_mode: false,
             apps: Vec::new(),
@@ -148,6 +152,7 @@ impl RokuRemoteApp {
             focus_text_input: false,
             text_entry: String::new(),
             live_key_tx,
+            device_stats: DeviceStats::default(),
             theme,
             ctx: cc.egui_ctx.clone(),
             rx,
@@ -493,11 +498,344 @@ impl RokuRemoteApp {
                         ui.label(egui::RichText::new("Submits search or activates selected item").color(self.theme.foreground).size(11.0));
                         ui.end_row();
 
-                        ui.label(egui::RichText::new("Esc:").strong().color(self.theme.accent).size(11.0));
-                        ui.label(egui::RichText::new("Closes this keyboard interface").color(self.theme.foreground).size(11.0));
+                    });
+            });
+    }
+
+    pub fn fetch_device_stats(&mut self) {
+        if self.selected_device_ip.is_empty() { return; }
+        self.device_stats.is_loading = true;
+        let ip = self.selected_device_ip.clone();
+        let tx = self.tx.clone();
+        let ctx = self.ctx.clone();
+        thread::spawn(move || {
+            fetch_device_stats_worker(&ip, &tx, &ctx);
+        });
+    }
+
+    pub fn send_developer_mode_sequence(&self) {
+        let keys = [
+            "Home", "Home", "Home",
+            "Up", "Up",
+            "Right", "Left", "Right", "Left", "Right",
+        ];
+        let ip = self.selected_device_ip.clone();
+        if ip.is_empty() { return; }
+        self.tv_powered_on.store(true, Ordering::Relaxed);
+        thread::spawn(move || {
+            let client = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_millis(1200))
+                .build()
+                .ok();
+            if let Some(c) = client {
+                for key in keys {
+                    let url = format!("http://{}:8060/keypress/{}", ip, key);
+                    let _ = c.post(&url).send();
+                    thread::sleep(Duration::from_millis(260));
+                }
+            }
+        });
+    }
+
+    pub fn render_sparkline_graph(
+        &self,
+        ui: &mut egui::Ui,
+        title: &str,
+        current_val_str: &str,
+        history: &[f32],
+        max_bound: f32,
+        line_color: egui::Color32,
+        height: f32,
+    ) {
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(title)
+                    .strong()
+                    .size(12.5)
+                    .color(self.theme.foreground),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    egui::RichText::new(current_val_str)
+                        .strong()
+                        .size(13.0)
+                        .color(line_color),
+                );
+            });
+        });
+
+        let available_w = ui.available_width().max(160.0);
+        let (response, painter) = ui.allocate_painter(
+            egui::vec2(available_w, height),
+            egui::Sense::hover(),
+        );
+        let rect = response.rect;
+
+        painter.rect_filled(rect, 6.0, self.theme.lighter_background);
+        painter.rect_stroke(rect, 6.0, egui::Stroke::new(1.0_f32, self.theme.dark_background));
+
+        if history.is_empty() {
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Awaiting Telemetry Samples...",
+                egui::FontId::proportional(11.0),
+                self.theme.dark_foreground,
+            );
+            return;
+        }
+
+        let grid_stroke = egui::Stroke::new(0.8_f32, self.theme.dark_background);
+        for fraction in [0.25f32, 0.5f32, 0.75f32] {
+            let y = rect.bottom() - (rect.height() * fraction);
+            painter.line_segment(
+                [egui::pos2(rect.left() + 4.0, y), egui::pos2(rect.right() - 4.0, y)],
+                grid_stroke,
+            );
+        }
+
+        let padding = 8.0f32;
+        let plot_w = (rect.width() - (padding * 2.0)).max(10.0);
+        let plot_h = (rect.height() - (padding * 2.0)).max(10.0);
+
+        let max_y = max_bound.max(history.iter().copied().fold(1.0f32, f32::max));
+        let n = history.len();
+        let dx = if n > 1 { plot_w / (n - 1) as f32 } else { plot_w };
+
+        let mut points: Vec<egui::Pos2> = Vec::with_capacity(n);
+        for (i, &val) in history.iter().enumerate() {
+            let norm_y = (val / max_y).clamp(0.0, 1.0);
+            let x = rect.left() + padding + (i as f32 * dx);
+            let y = rect.bottom() - padding - (norm_y * plot_h);
+            points.push(egui::pos2(x, y));
+        }
+
+        if points.len() >= 2 {
+            let mut poly = points.clone();
+            poly.push(egui::pos2(points.last().unwrap().x, rect.bottom() - padding));
+            poly.push(egui::pos2(points.first().unwrap().x, rect.bottom() - padding));
+
+            let fill_color = egui::Color32::from_rgba_premultiplied(
+                line_color.r() / 5,
+                line_color.g() / 5,
+                line_color.b() / 5,
+                40,
+            );
+            painter.add(egui::Shape::convex_polygon(poly, fill_color, egui::Stroke::NONE));
+
+            painter.add(egui::Shape::line(
+                points,
+                egui::Stroke::new(1.8f32, line_color),
+            ));
+        } else if let Some(&p) = points.first() {
+            painter.circle_filled(p, 3.5, line_color);
+        }
+    }
+
+    pub fn render_device_stats_content(&mut self, ui: &mut egui::Ui, _content_width: f32) {
+        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+
+        // Header Row
+        ui.horizontal(|ui| {
+            ui.heading(
+                egui::RichText::new("📊 Roku Stats & Performance")
+                    .color(self.theme.foreground)
+                    .size(16.0),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Close (Esc)").clicked() {
+                    self.show_device_stats = false;
+                }
+                if self.device_stats.is_loading {
+                    ui.spinner();
+                } else if ui.button("🔄 Refresh").clicked() {
+                    self.fetch_device_stats();
+                }
+                if ui.button("ℹ Device Info").clicked() {
+                    self.show_device_stats = false;
+                    self.show_device_info = true;
+                }
+            });
+        });
+
+        ui.separator();
+
+        // Running App & Target Device Banner
+        egui::Frame::none()
+            .fill(self.theme.lighter_background)
+            .rounding(6.0)
+            .inner_margin(egui::Margin::symmetric(10.0, 6.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Target:").strong().size(12.0).color(self.theme.accent));
+                    ui.label(egui::RichText::new(&self.device_name).size(12.0).color(self.theme.foreground));
+                    ui.label(egui::RichText::new(format!("({})", self.selected_device_ip)).size(11.0).color(self.theme.dark_foreground));
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let app_display = if self.active_app.is_empty() { "Home / System" } else { &self.active_app };
+                        ui.label(egui::RichText::new(app_display).strong().size(12.0).color(self.theme.accent));
+                        ui.label(egui::RichText::new("Active App:").size(12.0).color(self.theme.foreground));
+                    });
+                });
+            });
+
+        ui.add_space(2.0);
+
+        // Check if Developer Mode is enabled or failed
+        let dev_failed = self.device_stats.chanperf.as_ref().map_or(
+            !self.device_details.developer_enabled,
+            |cp| cp.status == "FAILED" || !cp.error_msg.is_empty(),
+        );
+
+        if dev_failed {
+            let error_txt = self.device_stats.chanperf.as_ref().map_or(
+                "Development Application installer is not enabled on this Roku.",
+                |cp| if cp.error_msg.is_empty() { "Developer mode not enabled." } else { &cp.error_msg }
+            );
+
+            egui::Frame::none()
+                .fill(self.theme.lighter_background)
+                .stroke(egui::Stroke::new(1.2f32, egui::Color32::from_rgb(220, 150, 40)))
+                .rounding(6.0)
+                .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("⚠️").size(16.0).color(egui::Color32::from_rgb(220, 150, 40)));
+                        ui.vertical(|ui| {
+                            ui.label(
+                                egui::RichText::new("Developer Mode Required for Real-time Profiling")
+                                    .strong()
+                                    .size(12.5)
+                                    .color(egui::Color32::from_rgb(220, 150, 40)),
+                            );
+                            ui.label(
+                                egui::RichText::new(format!("Roku response: \"{}\"\nTo unlock live CPU, RAM & FPS queries on Roku OS:", error_txt))
+                                    .size(11.0)
+                                    .color(self.theme.foreground),
+                            );
+                            ui.label(
+                                egui::RichText::new("Remote Secret Code: Home (3x) > Up (2x) > Right > Left > Right > Left > Right")
+                                    .strong()
+                                    .size(11.0)
+                                    .color(self.theme.accent),
+                            );
+                            ui.add_space(2.0);
+                            if ui.button("🎮 Send Secret Sequence to Roku Remote").clicked() {
+                                self.send_developer_mode_sequence();
+                            }
+                        });
+                    });
+                });
+
+            ui.add_space(4.0);
+        }
+
+        // Performance Telemetry Graphs
+        // 1. CPU Load Graph
+        let cpu_val_str = self.device_stats.chanperf.as_ref().map_or_else(
+            || if self.device_stats.cpu_history.is_empty() { "— %".to_string() } else { format!("{:.1}%", self.device_stats.cpu_history.last().unwrap()) },
+            |cp| format!("{:.1}% (usr: {:.1}%, sys: {:.1}%)", cp.cpu_percent, cp.user_cpu_percent, cp.sys_cpu_percent),
+        );
+        self.render_sparkline_graph(
+            ui,
+            "⚡ CPU Utilization",
+            &cpu_val_str,
+            &self.device_stats.cpu_history,
+            100.0,
+            egui::Color32::from_rgb(46, 204, 113),
+            65.0,
+        );
+
+        ui.add_space(4.0);
+
+        // 2. RAM Memory Utilization Graph
+        let ram_val_str = self.device_stats.chanperf.as_ref().map_or_else(
+            || if self.device_stats.ram_history.is_empty() { "— MB".to_string() } else { format!("{:.1} MB", self.device_stats.ram_history.last().unwrap()) },
+            |cp| format!("{:.1} MB", cp.memory_mb),
+        );
+        self.render_sparkline_graph(
+            ui,
+            "💾 RAM Memory Footprint",
+            &ram_val_str,
+            &self.device_stats.ram_history,
+            128.0,
+            self.theme.roku_purple,
+            65.0,
+        );
+
+        ui.add_space(4.0);
+
+        // Metrics Grid (FPS, VRAM Bitmaps, SceneGraph Nodes, Uptime)
+        egui::Frame::none()
+            .fill(self.theme.lighter_background)
+            .rounding(6.0)
+            .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+            .show(ui, |ui| {
+                egui::Grid::new("stats_metrics_grid")
+                    .spacing([12.0, 6.0])
+                    .show(ui, |ui| {
+                        // Row 1: Graphics FPS & SceneGraph Nodes
+                        ui.label(egui::RichText::new("Graphics Frame Rate:").strong().size(11.5).color(self.theme.accent));
+                        let fps_str = self.device_stats.frame_rate.as_ref().map_or_else(
+                            || "—".to_string(),
+                            |fr| if fr.status == "OK" { format!("{:.1} FPS", fr.fps) } else { "Dev Mode Needed".to_string() },
+                        );
+                        ui.label(egui::RichText::new(fps_str).size(11.5).color(self.theme.foreground));
+                        ui.end_row();
+
+                        // Row 2: VRAM Textures
+                        ui.label(egui::RichText::new("Texture Bitmaps:").strong().size(11.5).color(self.theme.accent));
+                        let bm_str = self.device_stats.bitmaps.as_ref().map_or_else(
+                            || "—".to_string(),
+                            |bm| if bm.status == "OK" { format!("{} textures", bm.texture_count) } else { "Dev Mode Needed".to_string() },
+                        );
+                        ui.label(egui::RichText::new(bm_str).size(11.5).color(self.theme.foreground));
+                        ui.end_row();
+
+                        // Row 3: SceneGraph Nodes
+                        ui.label(egui::RichText::new("SceneGraph Nodes:").strong().size(11.5).color(self.theme.accent));
+                        let sg_str = self.device_stats.sgnodes.as_ref().map_or_else(
+                            || "—".to_string(),
+                            |sg| if sg.status == "OK" { format!("{} roots, {} nodes", sg.root_count, sg.total_nodes) } else { "Dev Mode Needed".to_string() },
+                        );
+                        ui.label(egui::RichText::new(sg_str).size(11.5).color(self.theme.foreground));
+                        ui.end_row();
+
+                        // Row 4: System Uptime
+                        ui.label(egui::RichText::new("System Uptime:").strong().size(11.5).color(self.theme.accent));
+                        let uptime_s = self.device_details.uptime_seconds;
+                        let uptime_str = if uptime_s == 0 {
+                            "—".to_string()
+                        } else {
+                            let days = uptime_s / 86400;
+                            let hours = (uptime_s % 86400) / 3600;
+                            let mins = (uptime_s % 3600) / 60;
+                            let secs = uptime_s % 60;
+                            if days > 0 {
+                                format!("{}d {}h {}m", days, hours, mins)
+                            } else if hours > 0 {
+                                format!("{}h {}m {}s", hours, mins, secs)
+                            } else {
+                                format!("{}m {}s", mins, secs)
+                            }
+                        };
+                        ui.label(egui::RichText::new(uptime_str).size(11.5).color(self.theme.foreground));
+                        ui.end_row();
+
+                        // Row 5: Wi-Fi Driver & 5G
+                        ui.label(egui::RichText::new("Wi-Fi Hardware:").strong().size(11.5).color(self.theme.accent));
+                        let wifi_str = format!("Driver: {} (5GHz: {})", 
+                            if self.device_details.wifi_driver.is_empty() { "standard" } else { &self.device_details.wifi_driver },
+                            if self.device_details.has_wifi_5g { "Yes" } else { "No" }
+                        );
+                        ui.label(egui::RichText::new(wifi_str).size(11.5).color(self.theme.foreground));
                         ui.end_row();
                     });
             });
+    }
+
+    pub fn render_device_stats_narrow(&mut self, ui: &mut egui::Ui, content_width: f32) {
+        self.render_device_stats_content(ui, content_width);
     }
 
     pub fn power_on(&mut self) {
@@ -764,6 +1102,33 @@ impl RokuRemoteApp {
                         self.tv_powered_on.store(false, Ordering::Relaxed);
                     }
                     self.device_details = details;
+                }
+                BackgroundMessage::DeviceStatsUpdated { chanperf, frame_rate, bitmaps, sgnodes } => {
+                    self.device_stats.is_loading = false;
+                    self.device_stats.last_updated = Some(Instant::now());
+
+                    if chanperf.status == "OK" {
+                        self.device_stats.cpu_history.push(chanperf.cpu_percent);
+                        if self.device_stats.cpu_history.len() > 40 {
+                            self.device_stats.cpu_history.remove(0);
+                        }
+                        self.device_stats.ram_history.push(chanperf.memory_mb);
+                        if self.device_stats.ram_history.len() > 40 {
+                            self.device_stats.ram_history.remove(0);
+                        }
+                    }
+
+                    if frame_rate.status == "OK" && frame_rate.fps > 0.0 {
+                        self.device_stats.fps_history.push(frame_rate.fps);
+                        if self.device_stats.fps_history.len() > 40 {
+                            self.device_stats.fps_history.remove(0);
+                        }
+                    }
+
+                    self.device_stats.chanperf = Some(chanperf);
+                    self.device_stats.frame_rate = Some(frame_rate);
+                    self.device_stats.bitmaps = Some(bitmaps);
+                    self.device_stats.sgnodes = Some(sgnodes);
                 }
                 BackgroundMessage::PowerStateUpdated(reachable) => {
                     let was_reachable = self.is_device_reachable;
@@ -1421,6 +1786,11 @@ impl RokuRemoteApp {
                     self.show_device_info = false;
                 }
             }
+            if ui.button("📊 Stats").clicked() {
+                self.show_device_stats = true;
+                self.show_device_info = false;
+                self.fetch_device_stats();
+            }
             if ui.button("🔄 Refresh Info").clicked() {
                 self.refresh_device_info();
             }
@@ -1806,6 +2176,7 @@ impl RokuRemoteApp {
             self.show_setup_guide = !self.show_setup_guide;
             if self.show_setup_guide {
                 self.show_device_info = false;
+                self.show_device_stats = false;
                 self.show_shortcuts = false;
                 self.show_text_dialog = false;
             }
@@ -1817,6 +2188,7 @@ impl RokuRemoteApp {
             self.show_device_info = !self.show_device_info;
             if self.show_device_info {
                 self.show_setup_guide = false;
+                self.show_device_stats = false;
                 self.show_shortcuts = false;
                 self.show_text_dialog = false;
             }
@@ -1829,20 +2201,22 @@ impl RokuRemoteApp {
             self.focus_text_input = true;
             self.show_setup_guide = false;
             self.show_device_info = false;
+            self.show_device_stats = false;
             self.show_shortcuts = false;
             return;
         }
 
         // Escape closes any open modal dialog
-        if key_escape && (self.show_shortcuts || self.show_device_info || self.show_setup_guide) {
+        if key_escape && (self.show_shortcuts || self.show_device_info || self.show_device_stats || self.show_setup_guide) {
             self.show_shortcuts = false;
             self.show_device_info = false;
+            self.show_device_stats = false;
             self.show_setup_guide = false;
             return;
         }
 
         // When a modal or in-page dialog is open, do not forward remote control keys
-        if self.show_shortcuts || self.show_device_info || self.show_setup_guide {
+        if self.show_shortcuts || self.show_device_info || self.show_device_stats || self.show_setup_guide {
             return;
         }
 
@@ -2015,6 +2389,18 @@ impl eframe::App for RokuRemoteApp {
 
         self.handle_incoming_messages(ctx);
         self.handle_keyboard_shortcuts(ctx);
+
+        // When stats view is open, poll live telemetry every ~2 seconds
+        if self.show_device_stats && !self.selected_device_ip.is_empty() {
+            let should_refresh = match self.device_stats.last_updated {
+                Some(last) => last.elapsed() >= Duration::from_millis(2000),
+                None => true,
+            };
+            if should_refresh && !self.device_stats.is_loading {
+                self.fetch_device_stats();
+            }
+            ctx.request_repaint_after(Duration::from_millis(1000));
+        }
 
         // In wide view (>= 680px), show dialogs as centered floating modal windows.
         // In narrow view (< 680px), dialogs are rendered cleanly in-page inside CentralPanel.
@@ -2326,6 +2712,11 @@ impl eframe::App for RokuRemoteApp {
                                     self.show_device_info = false;
                                 }
                             }
+                            if ui.button("📊 Stats").clicked() {
+                                self.show_device_stats = true;
+                                self.show_device_info = false;
+                                self.fetch_device_stats();
+                            }
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if ui.button("Close").clicked() {
@@ -2333,6 +2724,19 @@ impl eframe::App for RokuRemoteApp {
                                 }
                             });
                         });
+                    });
+            }
+
+            // Roku Stats & Performance Modal Window
+            if self.show_device_stats {
+                egui::Window::new("📊 Roku Stats & Performance")
+                    .collapsible(false)
+                    .resizable(false)
+                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .default_width(390.0)
+                    .max_width(max_modal_w.max(390.0))
+                    .show(ctx, |ui| {
+                        self.render_device_stats_content(ui, 380.0);
                     });
             }
 
@@ -3015,7 +3419,7 @@ impl eframe::App for RokuRemoteApp {
             let is_limited = self.is_device_reachable
                 && (self.device_details.ecp_setting_mode.eq_ignore_ascii_case("limited")
                     || self.device_details.ecp_setting_mode.eq_ignore_ascii_case("disabled"));
-            let is_dialog_open_narrow = !is_wide && (self.show_device_info || self.show_setup_guide || self.show_shortcuts || self.show_text_dialog);
+            let is_dialog_open_narrow = !is_wide && (self.show_device_info || self.show_device_stats || self.show_setup_guide || self.show_shortcuts || self.show_text_dialog);
 
             if !is_dialog_open_narrow {
                 if is_limited {
@@ -3030,6 +3434,7 @@ impl eframe::App for RokuRemoteApp {
                         if ui.button(egui::RichText::new("⚙ Setup").color(egui::Color32::from_rgb(240, 160, 40))).clicked() {
                             self.show_setup_guide = true;
                             self.show_device_info = false;
+                            self.show_device_stats = false;
                             self.show_shortcuts = false;
                             self.show_text_dialog = false;
                         }
@@ -3045,6 +3450,7 @@ impl eframe::App for RokuRemoteApp {
                         if ui.button("⚙ Setup Guide").clicked() {
                             self.show_setup_guide = true;
                             self.show_device_info = false;
+                            self.show_device_stats = false;
                             self.show_shortcuts = false;
                             self.show_text_dialog = false;
                         }
@@ -3100,6 +3506,8 @@ impl eframe::App for RokuRemoteApp {
 
                                 if self.show_device_info {
                                     self.render_device_info_narrow(ui, content_width);
+                                } else if self.show_device_stats {
+                                    self.render_device_stats_narrow(ui, content_width);
                                 } else if self.show_setup_guide {
                                     self.render_setup_guide_narrow(ui, content_width);
                                 } else if self.show_shortcuts {
