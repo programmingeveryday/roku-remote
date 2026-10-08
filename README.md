@@ -32,29 +32,35 @@ A modern, fast, lightweight, and cross-platform native desktop remote control fo
 - **Adaptive Responsive Layout**:
   - Dynamically detects window dimensions and reflows into wide (two-column) or narrow (single-column) views with zero text collisions or button crowding.
   - Remote controls vertically align with the top of application cards in wide view.
-  - Device Info and Setup Guide automatically adapt between centered floating dialogs in wide mode and dedicated full-width in-page views in narrow mode.
+  - Device Info, Stats Dashboard, Live Keyboard, and Setup Guide automatically adapt between centered floating dialogs in wide mode and dedicated full-width in-page views in narrow mode with synchronized card box widths.
 - **Persistent Window Size & Position**:
   - Automatically restores your last-used window position and dimensions across launches.
 - **Full Keyboard Control & Shortcut Cheat Sheet**:
-  - Direct keyboard control for navigation, volume, playback, and app refresh.
+  - Direct keyboard control for navigation, volume, playback, stats, and app refresh.
   - Built-in shortcuts cheat sheet modal (`Ctrl + ,` or `Esc` to close).
 - **Live Roku Keyboard (Real-Time Keystroke Forwarding)**:
   - Dedicated Live Keyboard interface (open with `K`, header button, or remote button) that forwards every keystroke directly to your Roku in real-time as you type.
+  - Tailored for quick on-screen search, passwords, and text entry without tedious on-screen D-pad typing.
   - No "Send" button required: type letters, numbers, spaces, or symbols and watch them transmit live to your TV screen.
   - **Backspace**: Pressing Backspace on your physical keyboard or clicking the button immediately deletes the previous character on your TV.
   - **Delete / Clear**: Pressing the `Delete` key on your keyboard or clicking **`Clear All (Del)`** sends backspaces to wipe the entire text box on your TV clean.
   - **Enter**: Pressing `Enter` on your keyboard or clicking **`Enter`** submits your search or confirms input.
-  - Responsive design: renders as an elegant floating modal in wide view, and seamlessly in-page inside narrow view.
+  - **Uniform Layout**: Features a full-width cheat sheet card matching the search/password input box and control buttons, with auto-wrapping guidance for all screen sizes.
   - Global navigation shortcuts are paused while the Live Keyboard is active so you can freely type words without triggering TV actions. Press `Esc` to close.
 - **Omarchy / System Desktop Theme Integration**:
   - Automatically detects and matches Omarchy system themes (`colors.toml`) with live hot-reloading.
 - **Device Details & Telemetry View**:
-  - Inspect model name, model number, software version, Wi-Fi network & driver, UI resolution, power mode, IP address, and live/sleeping App Status.
-- **Real-Time Performance & Stats Dashboard (`📊 Stats`)**:
-  - Accessible directly under Device Details (`[ 📊 Stats ]`), available in both wide modal and compact narrow views.
-  - **Live Sparkline Graphs**: Visualizes real-time CPU utilization (`%`, user vs system breakdown) and RAM memory footprint (`MB`) with gradient filled charts.
-  - **Graphics & SceneGraph Telemetry**: Displays rendered graphics frame rate (`FPS`), active SceneGraph root & node count (`/query/sgnodes`), texture memory & VRAM bitmap allocations (`/query/r2d2-bitmaps`), system uptime, and Wi-Fi 5GHz status.
-  - **Automatic Developer Mode Assistance**: Automatically detects if Developer Mode is disabled on the Roku and offers a one-click button (`[ 🎮 Send Secret Sequence to Roku Remote ]`) to transmit the secret remote sequence (`Home x3, Up x2, Right, Left, Right, Left, Right`) directly to your Roku.
+  - Inspect model name, model number, serial number, software version, Wi-Fi network & driver, UI resolution, power mode, IP address, and live/sleeping App Status.
+  - Responsive full-width card layout with multi-line formatted MAC addresses to prevent horizontal clipping in narrow windows.
+- **Device & Stream Statistics Dashboard (`📊 Stats`)**:
+  - Accessible directly under Device Details (`[ 📊 Stats ]`) or via global shortcut **`Ctrl + S`**, available in both wide modal and compact narrow views.
+  - **Uniform-Width Clean Layout**: Balanced, full-width cards with two-column aligned metrics, clean spacing, and zero text collisions.
+  - **Device & Application State**: Displays device model, serial number, friendly name, running channel, media state, and playback position (`MM:SS / MM:SS`).
+  - **Network & Connectivity Diagnostics**: Network type, Wi-Fi signal strength (`Excellent`, `Good`), channel, gateway, IP address, and multi-line Wi-Fi and Bluetooth MAC addresses.
+  - **Display & Audio Profile**: UI resolution, TV panel resolution, power status, and audio output mode.
+  - **Active Stream Telemetry**: Real-time stream format, video bitrate / bandwidth, audio format, and buffering progress during active playback.
+  - **Persistent Refresh Button with Animated Status**: One-click **`🔄 Refresh Stats`** button with animated dots (`Refreshing...`) that stays visible in a disabled state during updates before automatically re-enabling.
+  - **Optimized On-Demand Polling**: Gathers an instant diagnostic snapshot on demand without continuous network overhead, only tracking live media playback position while active.
 - **Modular & Idiomatic Rust Architecture**:
   - Refactored into clean modules (`app`, `models`, `roku::client`, `roku::parser`, `theme`) with 100% unit test coverage for XML parsers and color utilities.
 
@@ -72,7 +78,7 @@ Roku Remote dynamically detects window width and automatically reflows its user 
   - **Row 2**: Device selector dropdown with margin separation on the left, quick action toolbar on the right.
   - **Row 3**: Real-time media playback state and discovery / scan status.
   - **Control & App Stack**: Ergonomic remote control pad followed by vertically scrollable quick-launch channel cards. Ideal for tiling window managers (Hyprland, Sway, i3) or sidebars.
-  - **Responsive In-Page Dialogs**: Device Details, Setup Guide, and Shortcuts cleanly render in-page with single-click `Close` buttons and auto-wrapping text down to 260px.
+  - **Responsive In-Page Dialogs**: Device Details, Stats, Setup Guide, Live Keyboard, and Shortcuts cleanly render in-page with single-click `Close` buttons, uniform card box widths, and auto-wrapping text down to 260px.
 
 <p align="center">
   <img src="docs/images/screenshot-narrow.png" width="340" alt="Roku Remote Compact View" />
@@ -94,14 +100,16 @@ Roku Remote dynamically detects window width and automatically reflows its user 
 | **R** | Replay | Instant replay (jumps back ~10s) |
 | **O** / **\*** | Options / Star | Roku Options / Asterisk (`*`) menu |
 | **Ctrl + Up / Down** | Volume | Volume Up / Volume Down |
+| **Ctrl + Left / Right** | Seek | Rewind (`<<`) / Fast Forward (`>>`) |
 | **M** | Mute | Toggle audio mute |
 | **I** | Device Info | Toggle Roku Device Details / Info dialog |
+| **Ctrl + S** | Stats | Toggle Device & Stream Stats dashboard |
 | **S** | Setup Guide | Toggle Setup & Troubleshooting Guide |
 | **Ctrl + M** | Window Size | Toggle window size (Min / Full Screen) |
 | **Ctrl + Shift + M** | Always on Top | Toggle Always-on-Top (compact size) |
 | **Ctrl + Shift + R** or **Ctrl + A** | Refresh Apps | Check and reload installed apps & icons |
 | **Ctrl + ,** | Cheat Sheet | Toggle keyboard shortcuts modal |
-| **K** | Live Keyboard | Open Live Keyboard to type, backspace, and clear text in real-time |
+| **K** | Live Keyboard | Open Live Keyboard for real-time search & password entry |
 
 ---
 
