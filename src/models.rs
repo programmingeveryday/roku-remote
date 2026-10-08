@@ -47,6 +47,14 @@ pub enum BackgroundMessage {
     AppIconLoaded { id: String, image: egui::ColorImage },
 }
 
+#[derive(Clone, Debug)]
+pub enum LiveKeyCommand {
+    Char(char),
+    Backspace,
+    Clear(usize),
+    Key(&'static str),
+}
+
 pub fn default_popular_apps() -> Vec<AppItem> {
     vec![
         AppItem { name: "YouTube".into(), id: "837".into() },

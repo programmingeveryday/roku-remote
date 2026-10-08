@@ -38,12 +38,14 @@ A modern, fast, lightweight, and cross-platform native desktop remote control fo
 - **Full Keyboard Control & Shortcut Cheat Sheet**:
   - Direct keyboard control for navigation, volume, playback, and app refresh.
   - Built-in shortcuts cheat sheet modal (`Ctrl + ,` or `Esc` to close).
-- **Interactive Keyboard & Text Entry Dialogue Box**:
-  - Dedicated dialogue modal (open with `K`, header button, or remote button) to type or paste search terms, passwords, and URLs directly into Roku on-screen keyboards.
-  - Keeps the remote control interface completely clean and uncluttered.
-  - Automatically streams encoded keystrokes (`Lit_<char>`) sequentially with automatic `Enter` submission.
-  - Pauses global remote control shortcuts while editing the dialogue box so typing is seamless. Press `Esc` or `Send & Enter` to close.
-  - Utility buttons for `Send Text`, `Backspace`, and `Enter`.
+- **Live Roku Keyboard (Real-Time Keystroke Forwarding)**:
+  - Dedicated Live Keyboard interface (open with `K`, header button, or remote button) that forwards every keystroke directly to your Roku in real-time as you type.
+  - No "Send" button required: type letters, numbers, spaces, or symbols and watch them transmit live to your TV screen.
+  - **Backspace**: Pressing Backspace on your physical keyboard or clicking the button immediately deletes the previous character on your TV.
+  - **Delete / Clear**: Pressing the `Delete` key on your keyboard or clicking **`Clear All (Del)`** sends backspaces to wipe the entire text box on your TV clean.
+  - **Enter**: Pressing `Enter` on your keyboard or clicking **`Enter`** submits your search or confirms input.
+  - Responsive design: renders as an elegant floating modal in wide view, and seamlessly in-page inside narrow view.
+  - Global navigation shortcuts are paused while the Live Keyboard is active so you can freely type words without triggering TV actions. Press `Esc` to close.
 - **Omarchy / System Desktop Theme Integration**:
   - Automatically detects and matches Omarchy system themes (`colors.toml`) with live hot-reloading.
 - **Device Details View**:
@@ -94,7 +96,7 @@ Roku Remote dynamically detects window width and automatically reflows its user 
 | **Ctrl + Shift + M** | Always on Top | Toggle Always-on-Top (compact size) |
 | **Ctrl + Shift + R** or **Ctrl + A** | Refresh Apps | Check and reload installed apps & icons |
 | **Ctrl + ,** | Cheat Sheet | Toggle keyboard shortcuts modal |
-| **K** | Text Entry | Open Keyboard & Text Entry dialogue box to type/paste to Roku |
+| **K** | Live Keyboard | Open Live Keyboard to type, backspace, and clear text in real-time |
 
 ---
 
