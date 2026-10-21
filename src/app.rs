@@ -257,6 +257,12 @@ impl RokuRemoteApp {
         if key != "Power" && key != "PowerOff" {
             self.set_tv_power_state(true);
         }
+        if key == "Home" {
+            let mut empty_player = MediaPlayerInfo::default();
+            empty_player.state = "close".to_string();
+            let _ = self.tx.send(BackgroundMessage::MediaPlayerUpdated(empty_player));
+            let _ = self.tx.send(BackgroundMessage::ActiveAppUpdated("Roku Dynamic Menu".to_string()));
+        }
         let ip = self.selected_device_ip.clone();
         let tx = self.tx.clone();
         let ctx = self.ctx.clone();
@@ -268,7 +274,7 @@ impl RokuRemoteApp {
             if let Ok(c) = client {
                 let _ = c.post(&url).send();
             }
-            thread::sleep(Duration::from_millis(800));
+            thread::sleep(Duration::from_millis(400));
             update_active_app_worker(&ip, &tx, &ctx);
             update_media_player_worker(&ip, &tx, &ctx);
         });
@@ -993,6 +999,9 @@ impl RokuRemoteApp {
 
     pub fn launch_app(&self, app_id: String) {
         self.set_tv_power_state(true);
+        let mut empty_player = MediaPlayerInfo::default();
+        empty_player.state = "buffer".to_string();
+        let _ = self.tx.send(BackgroundMessage::MediaPlayerUpdated(empty_player));
         let ip = self.selected_device_ip.clone();
         let tx = self.tx.clone();
         let ctx = self.ctx.clone();
@@ -1089,12 +1098,22 @@ impl RokuRemoteApp {
                     if app.eq_ignore_ascii_case("power saver") {
                         self.set_tv_power_state(false);
                     }
+                    if app.eq_ignore_ascii_case("roku dynamic menu") {
+                        self.media_player.state = "close".to_string();
+                        self.media_player.position_ms = None;
+                        self.media_player.duration_ms = None;
+                        self.last_media_pos_instant = None;
+                    }
                     self.active_app = app;
                 }
                 BackgroundMessage::ScreensaverUpdated(ssvr) => {
                     if let Some(ref name) = ssvr {
                         if !name.is_empty() {
                             self.set_tv_power_state(false);
+                            self.media_player.state = "close".to_string();
+                            self.media_player.position_ms = None;
+                            self.media_player.duration_ms = None;
+                            self.last_media_pos_instant = None;
                         }
                     }
                     self.active_screensaver = ssvr;
@@ -1139,14 +1158,21 @@ impl RokuRemoteApp {
                         self.set_tv_power_state(true);
                     }
                     self.media_player.state = info.state.clone();
-                    if info.position_ms.is_some() {
-                        self.media_player.position_ms = info.position_ms;
-                        self.last_media_pos_instant = Some(Instant::now());
+                    if info.state == "close" || info.state == "none" || info.state.is_empty() {
+                        self.media_player.position_ms = None;
+                        self.media_player.duration_ms = None;
+                        self.media_player.is_live = false;
+                        self.last_media_pos_instant = None;
+                    } else {
+                        if info.position_ms.is_some() {
+                            self.media_player.position_ms = info.position_ms;
+                            self.last_media_pos_instant = Some(Instant::now());
+                        }
+                        if info.duration_ms.is_some() {
+                            self.media_player.duration_ms = info.duration_ms;
+                        }
+                        self.media_player.is_live = info.is_live;
                     }
-                    if info.duration_ms.is_some() {
-                        self.media_player.duration_ms = info.duration_ms;
-                    }
-                    self.media_player.is_live = info.is_live;
                     if !info.app_name.is_empty() {
                         self.media_player.app_name = info.app_name;
                     }
@@ -1310,11 +1336,26 @@ impl RokuRemoteApp {
     pub fn render_playback_progress_bar(&mut self, ui: &mut egui::Ui, width: f32) {
         let is_playing = self.media_player.state == "play";
         let is_paused = self.media_player.state == "pause";
-        let has_duration = self.media_player.duration_ms.unwrap_or(0) > 0;
-        let is_active = is_playing || is_paused || has_duration;
+        let is_on_home_or_idle = self.active_app.eq_ignore_ascii_case("roku dynamic menu")
+            || self.active_app.is_empty()
+            || self.active_screensaver.is_some()
+            || self.media_player.state == "close"
+            || self.media_player.state == "none";
 
-        if !is_active {
+        let is_active = (is_playing || is_paused)
+            && !is_on_home_or_idle
+            && (self.media_player.duration_ms.unwrap_or(0) > 0 || self.media_player.is_live);
+
+        // Smooth reveal & collapse animation (~220ms)
+        let anim_id = ui.id().with("playback_progress_anim");
+        let openness = ui.ctx().animate_value_with_time(anim_id, if is_active { 1.0 } else { 0.0 }, 0.22);
+
+        if openness <= 0.005 {
             return;
+        }
+
+        if openness < 1.0 {
+            ui.ctx().request_repaint();
         }
 
         let raw_pos = self.media_player.position_ms.unwrap_or(0);
@@ -1344,9 +1385,9 @@ impl RokuRemoteApp {
             egui::Layout::top_down(egui::Align::Center),
             |ui| {
                 egui::Frame::none()
-                    .fill(self.theme.lighter_background)
+                    .fill(self.theme.lighter_background.gamma_multiply(openness))
                     .rounding(6.0)
-                    .stroke(egui::Stroke::new(1.0_f32, self.theme.background))
+                    .stroke(egui::Stroke::new(1.0_f32, self.theme.background.gamma_multiply(openness)))
                     .inner_margin(egui::Margin::symmetric(10.0, 7.0))
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
@@ -1364,7 +1405,7 @@ impl RokuRemoteApp {
                                 egui::RichText::new(app_title)
                                     .strong()
                                     .size(11.5)
-                                    .color(self.theme.foreground),
+                                    .color(self.theme.foreground.gamma_multiply(openness)),
                             );
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1381,7 +1422,7 @@ impl RokuRemoteApp {
                                     egui::RichText::new(status_str)
                                         .strong()
                                         .size(11.0)
-                                        .color(status_color),
+                                        .color(status_color.gamma_multiply(openness)),
                                 );
                             });
                         });
@@ -1409,7 +1450,7 @@ impl RokuRemoteApp {
                         ui.painter().rect_filled(
                             bar_rect,
                             2.5,
-                            egui::Color32::from_rgba_unmultiplied(35, 35, 45, 220),
+                            egui::Color32::from_rgba_unmultiplied(35, 35, 45, (220.0 * openness) as u8),
                         );
 
                         // Filled portion
@@ -1419,7 +1460,7 @@ impl RokuRemoteApp {
                                 bar_rect.min,
                                 egui::vec2(filled_w, bar_height),
                             );
-                            ui.painter().rect_filled(filled_rect, 2.5, self.theme.accent);
+                            ui.painter().rect_filled(filled_rect, 2.5, self.theme.accent.gamma_multiply(openness));
                         }
 
                         ui.add_space(3.0);
@@ -1448,12 +1489,12 @@ impl RokuRemoteApp {
                                 ui.label(
                                     egui::RichText::new(pos_str)
                                         .size(10.5)
-                                        .color(self.theme.foreground),
+                                        .color(self.theme.foreground.gamma_multiply(openness)),
                                 );
                                 ui.label(
                                     egui::RichText::new(format!("• {}", pct_str))
                                         .size(10.0)
-                                        .color(self.theme.dark_foreground),
+                                        .color(self.theme.dark_foreground.gamma_multiply(openness)),
                                 );
 
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1461,7 +1502,7 @@ impl RokuRemoteApp {
                                         egui::RichText::new(rem_str)
                                             .size(10.5)
                                             .strong()
-                                            .color(self.theme.foreground),
+                                            .color(self.theme.foreground.gamma_multiply(openness)),
                                     );
                                 });
                             } else {
@@ -1470,26 +1511,35 @@ impl RokuRemoteApp {
                                 ui.label(
                                     egui::RichText::new(pos_str)
                                         .size(10.5)
-                                        .color(self.theme.foreground),
+                                        .color(self.theme.foreground.gamma_multiply(openness)),
                                 );
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                     ui.label(
                                         egui::RichText::new("Live Stream")
                                             .size(10.5)
-                                            .color(self.theme.dark_foreground),
+                                            .color(self.theme.dark_foreground.gamma_multiply(openness)),
                                     );
                                 });
                             }
                         });
                     });
+
+                // Section separator below the playback progress card separating it from control buttons
+                ui.add_space(8.0 * openness);
+                let sep_w = (card_w - 8.0).max(100.0);
+                let (sep_rect, _) = ui.allocate_exact_size(egui::vec2(sep_w, 1.0), egui::Sense::hover());
+                let sep_col = egui::Color32::from_rgba_unmultiplied(65, 65, 80, (180.0 * openness) as u8);
+                ui.painter().line_segment(
+                    [sep_rect.left_center(), sep_rect.right_center()],
+                    egui::Stroke::new(1.0_f32, sep_col),
+                );
+                ui.add_space(8.0 * openness);
             },
         );
 
         if open_stats {
             self.show_device_stats = true;
         }
-
-        ui.add_space(8.0);
     }
 
     pub fn render_controls_section(&mut self, ui: &mut egui::Ui, width: f32) {
@@ -3830,8 +3880,20 @@ impl eframe::App for RokuRemoteApp {
 
                         // Align remote controls with where the app buttons begin on the right
                         let top_padding: f32 = ui.ctx().data_mut(|d| d.get_temp(offset_id)).unwrap_or(34.0);
-                        let is_playback_active = self.media_player.state == "play" || self.media_player.state == "pause" || self.media_player.duration_ms.unwrap_or(0) > 0;
-                        let pad = if is_playback_active { 0.0 } else { top_padding };
+                        let is_playing = self.media_player.state == "play";
+                        let is_paused = self.media_player.state == "pause";
+                        let is_on_home_or_idle = self.active_app.eq_ignore_ascii_case("roku dynamic menu")
+                            || self.active_app.is_empty()
+                            || self.active_screensaver.is_some()
+                            || self.media_player.state == "close"
+                            || self.media_player.state == "none";
+                        let is_playback_active = (is_playing || is_paused)
+                            && !is_on_home_or_idle
+                            && (self.media_player.duration_ms.unwrap_or(0) > 0 || self.media_player.is_live);
+
+                        let anim_id = ui.id().with("playback_progress_anim");
+                        let openness: f32 = ui.ctx().animate_value_with_time(anim_id, if is_playback_active { 1.0 } else { 0.0 }, 0.22);
+                        let pad = top_padding * (1.0 - openness).clamp(0.0, 1.0);
                         ui.add_space(pad);
 
                         self.render_controls_section(ui, controls_width);
