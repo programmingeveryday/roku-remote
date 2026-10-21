@@ -80,6 +80,8 @@ pub enum BackgroundMessage {
         device_details: Option<DeviceDetails>,
     },
     PowerStateUpdated(bool),
+    TvPowerStateUpdated(bool),
+    SamsungTvDiscovered { ip: String, name: String },
     AppIconLoaded { id: String, image: egui::ColorImage },
 }
 

@@ -331,17 +331,62 @@ pub fn save_cached_last_ip(ip: &str) {
     }
 }
 
-pub fn load_cached_tv_power_state() -> Option<bool> {
-    let cache_file = get_icon_cache_dir().join("tv_power_state.txt");
+pub fn load_cached_samsung_tv_ip() -> Option<String> {
+    let cache_file = get_icon_cache_dir().join("samsung_tv_ip.txt");
     std::fs::read_to_string(cache_file)
         .ok()
-        .map(|s| s.trim() == "1")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
-pub fn save_cached_tv_power_state(is_on: bool) {
-    let cache_file = get_icon_cache_dir().join("tv_power_state.txt");
-    let val = if is_on { "1" } else { "0" };
-    let _ = std::fs::write(cache_file, val);
+pub fn save_cached_samsung_tv_ip(ip: &str) {
+    if !ip.is_empty() {
+        let cache_file = get_icon_cache_dir().join("samsung_tv_ip.txt");
+        let _ = std::fs::write(cache_file, ip);
+    }
+}
+
+pub fn check_samsung_tv_power_worker(
+    tv_ip: &str,
+    tx: &Sender<BackgroundMessage>,
+    ctx: &egui::Context,
+) {
+    if tv_ip.is_empty() {
+        return;
+    }
+    let url = format!("http://{}:8001/api/v2/", tv_ip);
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_millis(800))
+        .build();
+    let is_on = match client {
+        Ok(c) => match c.get(&url).send() {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    if let Ok(text) = resp.text() {
+                        if let Some(start) = text.find("\"name\":\"") {
+                            let sub = &text[start + 8..];
+                            if let Some(end) = sub.find('"') {
+                                let name = &sub[..end];
+                                let _ = tx.send(BackgroundMessage::SamsungTvDiscovered {
+                                    ip: tv_ip.to_string(),
+                                    name: name.to_string(),
+                                });
+                            }
+                        }
+                        text.contains("\"PowerState\":\"on\"") || text.contains("\"PowerState\": \"on\"")
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            Err(_) => false,
+        },
+        Err(_) => false,
+    };
+    let _ = tx.send(BackgroundMessage::TvPowerStateUpdated(is_on));
+    ctx.request_repaint();
 }
 
 pub fn fetch_device_stats_worker(
@@ -489,5 +534,14 @@ mod tests {
     fn test_encode_char_for_lit_unicode() {
         assert_eq!(encode_char_for_lit('€'), "Lit_%E2%82%AC");
         assert_eq!(encode_char_for_lit('ñ'), "Lit_%C3%B1");
+    }
+
+    #[test]
+    fn test_parse_samsung_tv_power_state() {
+        let on_payload = r#"{"device":{"PowerState":"on","modelName":"UN75TU700DFXZA","name":"[TV] Livingroom TV"}}"#;
+        assert!(on_payload.contains("\"PowerState\":\"on\""));
+
+        let standby_payload = r#"{"device":{"PowerState":"standby","modelName":"UN75TU700DFXZA"}}"#;
+        assert!(!standby_payload.contains("\"PowerState\":\"on\""));
     }
 }
