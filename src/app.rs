@@ -10,8 +10,9 @@ use crate::models::{
     RokuDevice,
 };
 use crate::roku::client::{
-    fetch_device_stats_worker, load_app_icon_worker, refresh_apps_worker, start_scan,
-    update_active_app_worker, update_device_name_worker, update_media_player_worker,
+    fetch_device_stats_worker, load_app_icon_worker, load_cached_tv_power_state,
+    refresh_apps_worker, save_cached_tv_power_state, start_scan, update_active_app_worker,
+    update_device_name_worker, update_media_player_worker,
 };
 use crate::theme::{apply_theme, load_omarchy_theme, start_theme_watcher, ThemeColors};
 
@@ -137,7 +138,11 @@ impl RokuRemoteApp {
             media_player: MediaPlayerInfo::default(),
             device_details: DeviceDetails::default(),
             is_device_reachable: false,
-            tv_power_override: Arc::new(AtomicI8::new(-1)), // -1 = None (Check live state from device on launch, no assumptions)
+            tv_power_override: Arc::new(AtomicI8::new(match load_cached_tv_power_state() {
+                Some(true) => 1,
+                Some(false) => 0,
+                None => -1,
+            })),
             active_screensaver: None,
             last_media_pos_instant: None,
             show_device_info: false,
@@ -230,6 +235,7 @@ impl RokuRemoteApp {
 
     pub fn set_tv_power_state(&self, is_on: bool) {
         self.tv_power_override.store(if is_on { 1 } else { 0 }, Ordering::Relaxed);
+        save_cached_tv_power_state(is_on);
     }
 
     pub fn clear_tv_power_override(&self) {
@@ -906,37 +912,36 @@ impl RokuRemoteApp {
             return false;
         }
 
-        // 1. If an explicit session action override is set (e.g. user clicked Power Off / Power On),
-        // respect it during the active session.
-        if let Some(explicit) = self.get_power_override() {
-            return explicit;
-        }
-
-        // 2. Live telemetry check - no assumptions, pure device status:
-        // A. If screensaver is running, system is in suspension
-        if let Some(ref ssvr) = self.active_screensaver {
-            if !ssvr.is_empty() {
+        // For Roku TV hardware (integrated display):
+        // The TV's own power_mode tag directly reflects screen power.
+        if self.device_details.is_tv {
+            let pm = self.device_details.power_mode.to_lowercase();
+            if pm == "poweroff" || pm == "standby" || pm == "displayoff" || pm == "ready" || pm == "suspend" {
                 return false;
+            }
+            if pm == "poweron" {
+                return true;
             }
         }
 
-        // B. If active app is "Power Saver", system is in suspension
+        // For streaming sticks and players connected to an external TV:
+        // A. If Roku OS has engaged "Power Saver" mode, HDMI output is turned off
         if self.active_app.eq_ignore_ascii_case("power saver") {
             return false;
         }
 
-        // C. Check power-mode tag from Roku device-info
-        let pm = self.device_details.power_mode.to_lowercase();
-        if pm == "poweroff" || pm == "standby" || pm == "displayoff" || pm == "ready" || pm == "suspend" {
-            return false;
-        }
-
-        // D. If media is actively playing or paused, system is definitely on
-        if self.media_player.state == "play" || self.media_player.state == "pause" {
+        // B. If media is actively playing or buffering, the TV is definitely on
+        if self.media_player.state == "play" || self.media_player.state == "buffer" {
             return true;
         }
 
-        // E. If device reports PowerOn and no suspension state was detected, the device is on
+        // C. If an explicit or cached TV state is known, respect it
+        if let Some(explicit) = self.get_power_override() {
+            return explicit;
+        }
+
+        // D. Otherwise, if device reports poweron (including during screensaver or idle), it is on
+        let pm = self.device_details.power_mode.to_lowercase();
         if pm == "poweron" {
             return true;
         }
@@ -3428,8 +3433,6 @@ impl eframe::App for RokuRemoteApp {
                 }
             } else if is_powered_on {
                 (egui::Color32::from_rgb(46, 204, 113), "On")
-            } else if self.active_screensaver.is_some() || self.active_app.eq_ignore_ascii_case("power saver") {
-                (egui::Color32::from_rgb(230, 160, 30), "Suspended")
             } else {
                 (egui::Color32::from_rgb(230, 160, 30), "Standby")
             };

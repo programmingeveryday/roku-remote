@@ -331,6 +331,19 @@ pub fn save_cached_last_ip(ip: &str) {
     }
 }
 
+pub fn load_cached_tv_power_state() -> Option<bool> {
+    let cache_file = get_icon_cache_dir().join("tv_power_state.txt");
+    std::fs::read_to_string(cache_file)
+        .ok()
+        .map(|s| s.trim() == "1")
+}
+
+pub fn save_cached_tv_power_state(is_on: bool) {
+    let cache_file = get_icon_cache_dir().join("tv_power_state.txt");
+    let val = if is_on { "1" } else { "0" };
+    let _ = std::fs::write(cache_file, val);
+}
+
 pub fn fetch_device_stats_worker(
     ip: &str,
     tx: &Sender<BackgroundMessage>,
