@@ -733,12 +733,30 @@ impl RokuRemoteApp {
                             }
 
                             // Playback Progress
-                            if let (Some(pos), Some(dur)) = (self.media_player.position_ms, self.media_player.duration_ms) {
-                                if dur > 0 {
-                                    let pos_s = pos / 1000;
-                                    let dur_s = dur / 1000;
-                                    let prog_str = format!("{}:{:02} / {}:{:02} ({:.0}%)", pos_s / 60, pos_s % 60, dur_s / 60, dur_s % 60, (pos as f32 / dur as f32) * 100.0);
-                                    row("Playback Progress:", &prog_str);
+                            if let Some(pos) = self.media_player.position_ms {
+                                if self.media_player.state == "play" || self.media_player.state == "pause" {
+                                    let dur = self.media_player.duration_ms.unwrap_or(0);
+                                    if dur > 0 {
+                                        let pos_s = pos / 1000;
+                                        let dur_s = dur / 1000;
+                                        let rem_s = dur_s.saturating_sub(pos_s);
+                                        let rem_str = if rem_s >= 3600 {
+                                            format!("-{}:{:02}:{:02}", rem_s / 3600, (rem_s % 3600) / 60, rem_s % 60)
+                                        } else {
+                                            format!("-{}:{:02}", rem_s / 60, rem_s % 60)
+                                        };
+                                        let prog_str = format!("{}:{:02} / {}:{:02} ({:.0}%, {} left)", pos_s / 60, pos_s % 60, dur_s / 60, dur_s % 60, (pos as f32 / dur as f32) * 100.0, rem_str);
+                                        row("Playback Progress:", &prog_str);
+                                    } else {
+                                        let pos_s = pos / 1000;
+                                        let pos_str = if pos_s >= 3600 {
+                                            format!("{}:{:02}:{:02}", pos_s / 3600, (pos_s % 3600) / 60, pos_s % 60)
+                                        } else {
+                                            format!("{}:{:02}", pos_s / 60, pos_s % 60)
+                                        };
+                                        let prog_str = format!("{} (Total duration unmetered by app)", pos_str);
+                                        row("Playback Progress:", &prog_str);
+                                    }
                                 }
                             }
 
@@ -1342,9 +1360,13 @@ impl RokuRemoteApp {
             || self.media_player.state == "close"
             || self.media_player.state == "none";
 
+        let has_playback_metrics = self.media_player.position_ms.unwrap_or(0) > 0
+            || self.media_player.duration_ms.unwrap_or(0) > 0
+            || self.media_player.is_live;
+
         let is_active = (is_playing || is_paused)
             && !is_on_home_or_idle
-            && (self.media_player.duration_ms.unwrap_or(0) > 0 || self.media_player.is_live);
+            && has_playback_metrics;
 
         // Smooth reveal & collapse animation (~220ms)
         let anim_id = ui.id().with("playback_progress_anim");
@@ -1430,12 +1452,6 @@ impl RokuRemoteApp {
                         ui.add_space(4.0);
 
                         // Progress Bar Row
-                        let progress_fraction = if dur > 0 {
-                            (current_pos_ms as f32 / dur as f32).clamp(0.0, 1.0)
-                        } else {
-                            1.0
-                        };
-
                         let bar_height = 5.0f32;
                         let (bar_rect, bar_response) = ui.allocate_exact_size(
                             egui::vec2(ui.available_width(), bar_height),
@@ -1454,13 +1470,40 @@ impl RokuRemoteApp {
                         );
 
                         // Filled portion
-                        if progress_fraction > 0.0 {
-                            let filled_w = (bar_rect.width() * progress_fraction).max(3.0);
-                            let filled_rect = egui::Rect::from_min_size(
-                                bar_rect.min,
-                                egui::vec2(filled_w, bar_height),
-                            );
-                            ui.painter().rect_filled(filled_rect, 2.5, self.theme.accent.gamma_multiply(openness));
+                        if dur > 0 {
+                            let progress_fraction = (current_pos_ms as f32 / dur as f32).clamp(0.0, 1.0);
+                            if progress_fraction > 0.0 {
+                                let filled_w = (bar_rect.width() * progress_fraction).max(3.0);
+                                let filled_rect = egui::Rect::from_min_size(
+                                    bar_rect.min,
+                                    egui::vec2(filled_w, bar_height),
+                                );
+                                ui.painter().rect_filled(filled_rect, 2.5, self.theme.accent.gamma_multiply(openness));
+                            }
+                        } else if self.media_player.is_live {
+                            ui.painter().rect_filled(bar_rect, 2.5, egui::Color32::from_rgb(231, 76, 60).gamma_multiply(openness));
+                        } else {
+                            // Unmetered stream (e.g. YouTube): subtle sweeping pulse when playing, static when paused
+                            if is_playing {
+                                let time = ui.input(|i| i.time);
+                                let cycle = ((time * 0.75).fract()) as f32; // 0.0 to 1.0
+                                let sweep_w = (bar_rect.width() * 0.35).max(25.0);
+                                let sweep_x = bar_rect.min.x + (bar_rect.width() + sweep_w) * cycle - sweep_w;
+                                let left_x = sweep_x.max(bar_rect.min.x);
+                                let right_x = (sweep_x + sweep_w).min(bar_rect.max.x);
+                                if right_x > left_x {
+                                    let sweep_rect = egui::Rect::from_min_max(
+                                        egui::pos2(left_x, bar_rect.min.y),
+                                        egui::pos2(right_x, bar_rect.max.y),
+                                    );
+                                    ui.painter().rect_filled(sweep_rect, 2.5, self.theme.accent.gamma_multiply(openness * 0.9));
+                                }
+                                ui.ctx().request_repaint_after(Duration::from_millis(30));
+                            } else {
+                                let paused_w = (bar_rect.width() * 0.25).max(20.0);
+                                let paused_rect = egui::Rect::from_min_size(bar_rect.min, egui::vec2(paused_w, bar_height));
+                                ui.painter().rect_filled(paused_rect, 2.5, self.theme.accent.gamma_multiply(openness * 0.5));
+                            }
                         }
 
                         ui.add_space(3.0);
@@ -1484,6 +1527,7 @@ impl RokuRemoteApp {
                                     format!("-{}:{:02} left", rem_s / 60, rem_s % 60)
                                 };
 
+                                let progress_fraction = (current_pos_ms as f32 / dur as f32).clamp(0.0, 1.0);
                                 let pct_str = format!("{:.0}%", progress_fraction * 100.0);
 
                                 ui.label(
@@ -1505,9 +1549,13 @@ impl RokuRemoteApp {
                                             .color(self.theme.foreground.gamma_multiply(openness)),
                                     );
                                 });
-                            } else {
+                            } else if self.media_player.is_live {
                                 let pos_s = current_pos_ms / 1000;
-                                let pos_str = format!("{}:{:02}", pos_s / 60, pos_s % 60);
+                                let pos_str = if pos_s >= 3600 {
+                                    format!("{}:{:02}:{:02}", pos_s / 3600, (pos_s % 3600) / 60, pos_s % 60)
+                                } else {
+                                    format!("{}:{:02}", pos_s / 60, pos_s % 60)
+                                };
                                 ui.label(
                                     egui::RichText::new(pos_str)
                                         .size(10.5)
@@ -1519,6 +1567,31 @@ impl RokuRemoteApp {
                                             .size(10.5)
                                             .color(self.theme.dark_foreground.gamma_multiply(openness)),
                                     );
+                                });
+                            } else {
+                                let pos_s = current_pos_ms / 1000;
+                                let pos_str = if pos_s >= 3600 {
+                                    format!("{}:{:02}:{:02}", pos_s / 3600, (pos_s % 3600) / 60, pos_s % 60)
+                                } else {
+                                    format!("{}:{:02}", pos_s / 60, pos_s % 60)
+                                };
+                                ui.label(
+                                    egui::RichText::new(pos_str)
+                                        .size(10.5)
+                                        .color(self.theme.foreground.gamma_multiply(openness)),
+                                );
+                                ui.label(
+                                    egui::RichText::new("• Active stream")
+                                        .size(10.0)
+                                        .color(self.theme.dark_foreground.gamma_multiply(openness)),
+                                );
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    let lbl = ui.label(
+                                        egui::RichText::new("Duration not reported by app")
+                                            .size(10.0)
+                                            .color(self.theme.dark_foreground.gamma_multiply(openness)),
+                                    );
+                                    lbl.on_hover_text("YouTube runs on an internal web engine (Cobalt) that does not expose video duration to Roku's external control API.");
                                 });
                             }
                         });
@@ -3887,9 +3960,12 @@ impl eframe::App for RokuRemoteApp {
                             || self.active_screensaver.is_some()
                             || self.media_player.state == "close"
                             || self.media_player.state == "none";
+                        let has_playback_metrics = self.media_player.position_ms.unwrap_or(0) > 0
+                            || self.media_player.duration_ms.unwrap_or(0) > 0
+                            || self.media_player.is_live;
                         let is_playback_active = (is_playing || is_paused)
                             && !is_on_home_or_idle
-                            && (self.media_player.duration_ms.unwrap_or(0) > 0 || self.media_player.is_live);
+                            && has_playback_metrics;
 
                         let anim_id = ui.id().with("playback_progress_anim");
                         let openness: f32 = ui.ctx().animate_value_with_time(anim_id, if is_playback_active { 1.0 } else { 0.0 }, 0.22);

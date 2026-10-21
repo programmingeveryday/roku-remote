@@ -214,6 +214,9 @@ pub fn parse_media_player_xml(xml: &str) -> MediaPlayerInfo {
             "aac" => "AAC Stereo",
             "atmos" => "Dolby Atmos",
             "dts" => "DTS Surround",
+            "opus" => "Opus",
+            "mp3" => "MP3",
+            "flac" => "FLAC Lossless",
             _ => &ac,
         };
         info.audio_codec = friendly.to_string();
@@ -377,6 +380,17 @@ mod tests {
         assert_eq!(p_info.app_name, "Netflix");
         assert_eq!(p_info.position_ms, Some(5000));
         assert_eq!(p_info.is_live, false);
+
+        // Real-world YouTube XML where duration is omitted by Cobalt
+        let youtube_sample = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?><player state=\"play\" error=\"false\"><plugin id=\"837\" name=\"YouTube\" /><format audio=\"opus\" video=\"av1\" captions=\"none\" drm=\"none\" /><position>725982 ms</position></player>";
+        let yt_info = parse_media_player_xml(youtube_sample);
+        assert_eq!(yt_info.state, "play");
+        assert_eq!(yt_info.app_name, "YouTube");
+        assert_eq!(yt_info.position_ms, Some(725982));
+        assert_eq!(yt_info.duration_ms, None);
+        assert_eq!(yt_info.is_live, false);
+        assert_eq!(yt_info.video_codec, "AV1 Next-Gen");
+        assert_eq!(yt_info.audio_codec, "Opus");
 
         // Zero values during stream startup/buffering should not result in 0 or 0x0
         let zero_sample = "<player state=\"play\"><plugin name=\"Paramount\" bandwidth=\"0 bps\" /><stream_segment bitrate=\"0\" width=\"0\" height=\"0\" /></player>";
