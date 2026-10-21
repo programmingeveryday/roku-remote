@@ -63,6 +63,42 @@ pub struct DeviceStats {
     pub is_loading: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TvBrand {
+    Samsung,
+    Lg,
+    Sony,
+    Vizio,
+}
+
+impl TvBrand {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TvBrand::Samsung => "Samsung",
+            TvBrand::Lg => "LG",
+            TvBrand::Sony => "Sony",
+            TvBrand::Vizio => "Vizio",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().as_str() {
+            "samsung" => Some(TvBrand::Samsung),
+            "lg" | "webos" => Some(TvBrand::Lg),
+            "sony" | "bravia" => Some(TvBrand::Sony),
+            "vizio" | "smartcast" => Some(TvBrand::Vizio),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PairedTvInfo {
+    pub brand: TvBrand,
+    pub ip: String,
+    pub name: String,
+}
+
 pub enum BackgroundMessage {
     DeviceDiscovered(RokuDevice),
     DeviceNameUpdated(String),
@@ -81,7 +117,7 @@ pub enum BackgroundMessage {
     },
     PowerStateUpdated(bool),
     TvPowerStateUpdated(bool),
-    SamsungTvDiscovered { ip: String, name: String },
+    SmartTvDiscovered(PairedTvInfo),
     AppIconLoaded { id: String, image: egui::ColorImage },
 }
 

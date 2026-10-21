@@ -7,11 +7,11 @@ use std::time::Duration;
 
 use crate::models::{
     AppItem, BackgroundMessage, DeviceDetails, DeviceStats, LiveKeyCommand, MediaPlayerInfo,
-    RokuDevice,
+    PairedTvInfo, RokuDevice,
 };
 use crate::roku::client::{
-    check_samsung_tv_power_worker, fetch_device_stats_worker, load_app_icon_worker,
-    load_cached_samsung_tv_ip, refresh_apps_worker, save_cached_samsung_tv_ip, start_scan,
+    check_smart_tv_power_worker, fetch_device_stats_worker, load_app_icon_worker,
+    load_cached_paired_tv, refresh_apps_worker, save_cached_paired_tv, start_scan,
     update_active_app_worker, update_device_name_worker, update_media_player_worker,
 };
 use crate::theme::{apply_theme, load_omarchy_theme, start_theme_watcher, ThemeColors};
@@ -31,10 +31,9 @@ pub struct RokuRemoteApp {
     pub device_details: DeviceDetails,
     pub is_device_reachable: bool,
     pub tv_power_override: Arc<AtomicI8>,
-    pub paired_tv_ip: String,
-    pub paired_tv_name: String,
+    pub paired_tv: PairedTvInfo,
     pub tv_is_screen_on: Option<bool>,
-    pub shared_tv_ip: Arc<Mutex<String>>,
+    pub shared_tv: Arc<Mutex<PairedTvInfo>>,
     pub active_screensaver: Option<String>,
     pub last_media_pos_instant: Option<std::time::Instant>,
     pub show_device_info: bool,
@@ -78,23 +77,22 @@ impl RokuRemoteApp {
         let initial_ip = crate::roku::client::load_cached_last_ip()
             .unwrap_or_else(|| "192.168.0.31".to_string());
         let shared_ip = Arc::new(Mutex::new(initial_ip.clone()));
-        let initial_tv_ip = load_cached_samsung_tv_ip()
-            .unwrap_or_else(|| "192.168.0.212".to_string());
-        let shared_tv_ip = Arc::new(Mutex::new(initial_tv_ip.clone()));
+        let initial_tv = load_cached_paired_tv();
+        let shared_tv = Arc::new(Mutex::new(initial_tv.clone()));
 
         Self::start_playback_watcher(
             shared_ip.clone(),
-            shared_tv_ip.clone(),
+            shared_tv.clone(),
             tx.clone(),
             cc.egui_ctx.clone(),
             is_active.clone(),
         );
 
-        let init_tv_ip = initial_tv_ip.clone();
+        let init_tv = initial_tv.clone();
         let init_tv_tx = tx.clone();
         let init_tv_ctx = cc.egui_ctx.clone();
         thread::spawn(move || {
-            check_samsung_tv_power_worker(&init_tv_ip, &init_tv_tx, &init_tv_ctx);
+            check_smart_tv_power_worker(&init_tv, &init_tv_tx, &init_tv_ctx);
         });
 
         let (live_key_tx, live_key_rx) = channel::<LiveKeyCommand>();
@@ -155,10 +153,9 @@ impl RokuRemoteApp {
             device_details: DeviceDetails::default(),
             is_device_reachable: false,
             tv_power_override: Arc::new(AtomicI8::new(-1)),
-            paired_tv_ip: initial_tv_ip,
-            paired_tv_name: "[TV] Livingroom TV".to_string(),
+            paired_tv: initial_tv,
             tv_is_screen_on: None,
-            shared_tv_ip,
+            shared_tv,
             active_screensaver: None,
             last_media_pos_instant: None,
             show_device_info: false,
@@ -215,7 +212,7 @@ impl RokuRemoteApp {
 
     fn start_playback_watcher(
         shared_ip: Arc<Mutex<String>>,
-        shared_tv_ip: Arc<Mutex<String>>,
+        shared_tv: Arc<Mutex<PairedTvInfo>>,
         tx: Sender<BackgroundMessage>,
         ctx: egui::Context,
         is_active: Arc<AtomicBool>,
@@ -234,12 +231,12 @@ impl RokuRemoteApp {
                     update_active_app_worker(&ip, &tx, &ctx);
                     update_media_player_worker(&ip, &tx, &ctx);
                 }
-                let tv_ip = {
-                    let guard = shared_tv_ip.lock().unwrap();
+                let tv = {
+                    let guard = shared_tv.lock().unwrap();
                     guard.clone()
                 };
-                if !tv_ip.is_empty() {
-                    check_samsung_tv_power_worker(&tv_ip, &tx, &ctx);
+                if !tv.ip.is_empty() {
+                    check_smart_tv_power_worker(&tv, &tx, &ctx);
                 }
             }
         });
@@ -982,7 +979,7 @@ impl RokuRemoteApp {
         let is_tv = self.device_details.is_tv;
         let tx = self.tx.clone();
         let ctx = self.ctx.clone();
-        let tv_ip = self.paired_tv_ip.clone();
+        let tv = self.paired_tv.clone();
 
         thread::spawn(move || {
             let client = reqwest::blocking::Client::builder()
@@ -1016,8 +1013,8 @@ impl RokuRemoteApp {
                 update_device_name_worker(&ip, &tx, &ctx);
                 update_active_app_worker(&ip, &tx, &ctx);
                 update_media_player_worker(&ip, &tx, &ctx);
-                if !tv_ip.is_empty() {
-                    check_samsung_tv_power_worker(&tv_ip, &tx, &ctx);
+                if !tv.ip.is_empty() {
+                    check_smart_tv_power_worker(&tv, &tx, &ctx);
                 }
             }
         });
@@ -1032,7 +1029,7 @@ impl RokuRemoteApp {
         let ip = self.selected_device_ip.clone();
         let tx = self.tx.clone();
         let ctx = self.ctx.clone();
-        let tv_ip = self.paired_tv_ip.clone();
+        let tv = self.paired_tv.clone();
 
         thread::spawn(move || {
             let client = reqwest::blocking::Client::builder()
@@ -1059,8 +1056,8 @@ impl RokuRemoteApp {
                 update_device_name_worker(&ip, &tx, &ctx);
                 update_active_app_worker(&ip, &tx, &ctx);
                 update_media_player_worker(&ip, &tx, &ctx);
-                if !tv_ip.is_empty() {
-                    check_samsung_tv_power_worker(&tv_ip, &tx, &ctx);
+                if !tv.ip.is_empty() {
+                    check_smart_tv_power_worker(&tv, &tx, &ctx);
                 }
             }
         });
@@ -1103,12 +1100,12 @@ impl RokuRemoteApp {
         self.status_text = "Refreshing device & scanning network...".into();
         self.start_discovery_scan();
         self.refresh_device_info();
-        if !self.paired_tv_ip.is_empty() {
-            let tv_ip = self.paired_tv_ip.clone();
+        if !self.paired_tv.ip.is_empty() {
+            let tv = self.paired_tv.clone();
             let tx = self.tx.clone();
             let ctx = self.ctx.clone();
             thread::spawn(move || {
-                check_samsung_tv_power_worker(&tv_ip, &tx, &ctx);
+                check_smart_tv_power_worker(&tv, &tx, &ctx);
             });
         }
     }
@@ -1398,13 +1395,12 @@ impl RokuRemoteApp {
                 BackgroundMessage::TvPowerStateUpdated(is_on) => {
                     self.tv_is_screen_on = Some(is_on);
                 }
-                BackgroundMessage::SamsungTvDiscovered { ip, name } => {
-                    self.paired_tv_ip = ip.clone();
-                    self.paired_tv_name = name;
-                    save_cached_samsung_tv_ip(&ip);
-                    if let Ok(mut guard) = self.shared_tv_ip.lock() {
-                        *guard = ip;
+                BackgroundMessage::SmartTvDiscovered(tv_info) => {
+                    save_cached_paired_tv(&tv_info);
+                    if let Ok(mut guard) = self.shared_tv.lock() {
+                        *guard = tv_info.clone();
                     }
+                    self.paired_tv = tv_info;
                 }
                 BackgroundMessage::AppIconLoaded { id, image } => {
                     self.pending_icons.push((id, image));
@@ -2185,6 +2181,15 @@ impl RokuRemoteApp {
                                 "Off / Standby"
                             };
                             row("TV Status:", tv_status);
+                            if !self.paired_tv.ip.is_empty() {
+                                let paired_str = format!(
+                                    "{} • {} ({})",
+                                    self.paired_tv.brand.as_str(),
+                                    self.paired_tv.name,
+                                    self.paired_tv.ip
+                                );
+                                row("Paired TV:", &paired_str);
+                            }
                         }
                         row("IP Address:", &self.selected_device_ip);
 
@@ -3139,6 +3144,15 @@ impl eframe::App for RokuRemoteApp {
                                         "Off / Standby"
                                     };
                                     row("TV Status:", tv_status);
+                                    if !self.paired_tv.ip.is_empty() {
+                                        let paired_str = format!(
+                                            "{} • {} ({})",
+                                            self.paired_tv.brand.as_str(),
+                                            self.paired_tv.name,
+                                            self.paired_tv.ip
+                                        );
+                                        row("Paired TV:", &paired_str);
+                                    }
                                 }
                                 row("IP Address:", &self.selected_device_ip);
 
@@ -3527,9 +3541,14 @@ impl eframe::App for RokuRemoteApp {
                                 .color(power_icon_color),
                         ).sense(egui::Sense::click())
                     );
-                    let badge_tip = if !self.paired_tv_name.is_empty() {
+                    let badge_tip = if !self.paired_tv.name.is_empty() {
                         let tv_st = if is_powered_on { "Screen On" } else { "Standby / Screen Off" };
-                        format!("{} • {} (Click to manually toggle state)", self.paired_tv_name, tv_st)
+                        format!(
+                            "{} ({}) • {} (Click to manually toggle state)",
+                            self.paired_tv.name,
+                            self.paired_tv.brand.as_str(),
+                            tv_st
+                        )
                     } else {
                         "TV Power Status (Click to manually toggle state)".to_string()
                     };
@@ -3559,11 +3578,11 @@ impl eframe::App for RokuRemoteApp {
                         ui.painter().text(text_pos, egui::Align2::LEFT_CENTER, power_label, egui::FontId::proportional(12.0), egui::Color32::WHITE);
                         let tooltip = if self.device_details.is_tv {
                             if is_powered_on { "Turn off Roku TV".to_string() } else { "Turn on Roku TV".to_string() }
-                        } else if !self.paired_tv_name.is_empty() {
+                        } else if !self.paired_tv.name.is_empty() {
                             if is_powered_on {
-                                format!("Turn off {} (HDMI-CEC Standby)", self.paired_tv_name)
+                                format!("Turn off {} (HDMI-CEC Standby)", self.paired_tv.name)
                             } else {
-                                format!("Turn on {} (HDMI-CEC 1-Touch Play)", self.paired_tv_name)
+                                format!("Turn on {} (HDMI-CEC 1-Touch Play)", self.paired_tv.name)
                             }
                         } else {
                             if is_powered_on { "Turn off TV (HDMI-CEC Standby)".to_string() } else { "Turn on TV (HDMI-CEC 1-Touch Play)".to_string() }
@@ -3718,9 +3737,14 @@ impl eframe::App for RokuRemoteApp {
                                 .color(power_icon_color),
                         ).sense(egui::Sense::click())
                     );
-                    let badge_tip = if !self.paired_tv_name.is_empty() {
+                    let badge_tip = if !self.paired_tv.name.is_empty() {
                         let tv_st = if is_powered_on { "Screen On" } else { "Standby / Screen Off" };
-                        format!("{} • {} (Click to manually toggle state)", self.paired_tv_name, tv_st)
+                        format!(
+                            "{} ({}) • {} (Click to manually toggle state)",
+                            self.paired_tv.name,
+                            self.paired_tv.brand.as_str(),
+                            tv_st
+                        )
                     } else {
                         "TV Power Status (Click to manually toggle state)".to_string()
                     };
@@ -3749,11 +3773,11 @@ impl eframe::App for RokuRemoteApp {
                         ui.painter().text(text_pos, egui::Align2::LEFT_CENTER, power_label, egui::FontId::proportional(10.5), egui::Color32::WHITE);
                         let tooltip = if self.device_details.is_tv {
                             if is_powered_on { "Turn off Roku TV".to_string() } else { "Turn on Roku TV".to_string() }
-                        } else if !self.paired_tv_name.is_empty() {
+                        } else if !self.paired_tv.name.is_empty() {
                             if is_powered_on {
-                                format!("Turn off {} (HDMI-CEC Standby)", self.paired_tv_name)
+                                format!("Turn off {} (HDMI-CEC Standby)", self.paired_tv.name)
                             } else {
-                                format!("Turn on {} (HDMI-CEC 1-Touch Play)", self.paired_tv_name)
+                                format!("Turn on {} (HDMI-CEC 1-Touch Play)", self.paired_tv.name)
                             }
                         } else {
                             if is_powered_on { "Turn off TV (HDMI-CEC Standby)".to_string() } else { "Turn on TV (HDMI-CEC 1-Touch Play)".to_string() }

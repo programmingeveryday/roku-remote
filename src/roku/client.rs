@@ -1,10 +1,11 @@
 use eframe::egui;
+use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, UdpSocket};
 use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::models::{BackgroundMessage, MediaPlayerInfo, RokuDevice};
+use crate::models::{BackgroundMessage, MediaPlayerInfo, PairedTvInfo, RokuDevice, TvBrand};
 use crate::roku::parser::{
     clean_html_entities, parse_active_app_xml, parse_apps_xml,
     parse_device_details_xml, parse_device_name_xml,
@@ -92,13 +93,21 @@ ST: roku:ecp\r\n\r\n";
                     s.spawn(move || {
                         for i in chunk {
                             let ip = format!("{}.{}.{}.{}", o1, o2, o3, i);
+                            let mut is_roku = false;
                             if let Ok(addr) = format!("{}:8060", ip).parse::<SocketAddr>() {
                                 if TcpStream::connect_timeout(&addr, Duration::from_millis(220)).is_ok() {
+                                    is_roku = true;
                                     let name = fetch_device_display_name(&ip);
                                     let _ = tx_ref.send(BackgroundMessage::DeviceDiscovered(RokuDevice {
-                                        ip,
+                                        ip: ip.clone(),
                                         name,
                                     }));
+                                    ctx_ref.request_repaint();
+                                }
+                            }
+                            if !is_roku {
+                                if let Some(tv_info) = probe_smart_tv_at_ip(&ip) {
+                                    let _ = tx_ref.send(BackgroundMessage::SmartTvDiscovered(tv_info));
                                     ctx_ref.request_repaint();
                                 }
                             }
@@ -331,62 +340,411 @@ pub fn save_cached_last_ip(ip: &str) {
     }
 }
 
-pub fn load_cached_samsung_tv_ip() -> Option<String> {
-    let cache_file = get_icon_cache_dir().join("samsung_tv_ip.txt");
-    std::fs::read_to_string(cache_file)
+pub fn load_cached_paired_tv() -> PairedTvInfo {
+    let paired_file = get_icon_cache_dir().join("paired_tv.txt");
+    if let Ok(raw) = std::fs::read_to_string(&paired_file) {
+        let parts: Vec<&str> = raw.trim().splitn(3, '|').collect();
+        if parts.len() == 3 {
+            if let Some(brand) = TvBrand::from_str(parts[0]) {
+                let ip = parts[1].trim().to_string();
+                let name = parts[2].trim().to_string();
+                if !ip.is_empty() {
+                    return PairedTvInfo { brand, ip, name };
+                }
+            }
+        }
+    }
+
+    // Fallback to legacy samsung_tv_ip.txt or default Livingroom Samsung TV
+    let legacy_file = get_icon_cache_dir().join("samsung_tv_ip.txt");
+    let ip = std::fs::read_to_string(legacy_file)
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-}
+        .unwrap_or_else(|| "192.168.0.212".to_string());
 
-pub fn save_cached_samsung_tv_ip(ip: &str) {
-    if !ip.is_empty() {
-        let cache_file = get_icon_cache_dir().join("samsung_tv_ip.txt");
-        let _ = std::fs::write(cache_file, ip);
+    PairedTvInfo {
+        brand: TvBrand::Samsung,
+        ip,
+        name: "[TV] Livingroom TV".to_string(),
     }
 }
 
-pub fn check_samsung_tv_power_worker(
-    tv_ip: &str,
+pub fn save_cached_paired_tv(tv: &PairedTvInfo) {
+    if !tv.ip.is_empty() {
+        let paired_file = get_icon_cache_dir().join("paired_tv.txt");
+        let content = format!("{}|{}|{}", tv.brand.as_str(), tv.ip, tv.name);
+        let _ = std::fs::write(paired_file, content);
+        if tv.brand == TvBrand::Samsung {
+            let legacy_file = get_icon_cache_dir().join("samsung_tv_ip.txt");
+            let _ = std::fs::write(legacy_file, &tv.ip);
+        }
+    }
+}
+
+fn extract_json_string_field(json: &str, key: &str) -> Option<String> {
+    for pattern in [format!("\"{}\":\"", key), format!("\"{}\": \"", key)] {
+        if let Some(start) = json.find(&pattern) {
+            let sub = &json[start + pattern.len()..];
+            if let Some(end) = sub.find('"') {
+                let val = sub[..end].trim();
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn parse_samsung_power_state(json: &str) -> Option<bool> {
+    if let Some(state) = extract_json_string_field(json, "PowerState") {
+        return Some(state.eq_ignore_ascii_case("on"));
+    }
+    if json.contains("\"id\":") && json.contains("\"device\":") {
+        // Older Samsung Tizen models that omit PowerState only respond on port 8001 while awake
+        return Some(true);
+    }
+    None
+}
+
+pub fn parse_samsung_tv_name(json: &str) -> Option<String> {
+    extract_json_string_field(json, "name")
+        .or_else(|| extract_json_string_field(json, "modelName"))
+}
+
+pub fn parse_sony_power_status(json: &str) -> Option<bool> {
+    if let Some(status) = extract_json_string_field(json, "status") {
+        if status.eq_ignore_ascii_case("active") {
+            return Some(true);
+        }
+        if status.eq_ignore_ascii_case("standby") || status.eq_ignore_ascii_case("off") {
+            return Some(false);
+        }
+    }
+    None
+}
+
+pub fn parse_sony_model_name(json: &str) -> Option<String> {
+    if !json.contains("BRAVIA") && !json.contains("sony") && !json.contains("InterfaceVersion") {
+        return None;
+    }
+    if let Some(model) = extract_json_string_field(json, "modelName") {
+        return Some(format!("Sony BRAVIA ({})", model));
+    }
+    Some("Sony BRAVIA TV".to_string())
+}
+
+pub fn parse_lg_power_state(payload: &str) -> Option<bool> {
+    let lower = payload.to_lowercase();
+    if lower.contains("\"screen off\"")
+        || lower.contains("\"active standby\"")
+        || lower.contains("\"standby\"")
+        || lower.contains("\"power off\"")
+        || lower.contains("\"suspend\"")
+    {
+        return Some(false);
+    }
+    if lower.contains("\"active\"") || lower.contains("101 switching protocols") {
+        return Some(true);
+    }
+    None
+}
+
+pub fn parse_vizio_power_mode(json: &str) -> Option<bool> {
+    let compact: String = json.chars().filter(|c| !c.is_whitespace()).collect();
+    if compact.contains("\"VALUE\":1") {
+        return Some(true);
+    }
+    if compact.contains("\"VALUE\":0") {
+        return Some(false);
+    }
+    None
+}
+
+fn check_samsung_tv_power(tv_ip: &str, tx: &Sender<BackgroundMessage>) -> bool {
+    let url = format!("http://{}:8001/api/v2/", tv_ip);
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_millis(800))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    if let Ok(resp) = client.get(&url).send() {
+        if resp.status().is_success() {
+            if let Ok(text) = resp.text() {
+                if let Some(name) = parse_samsung_tv_name(&text) {
+                    let _ = tx.send(BackgroundMessage::SmartTvDiscovered(PairedTvInfo {
+                        brand: TvBrand::Samsung,
+                        ip: tv_ip.to_string(),
+                        name,
+                    }));
+                }
+                return parse_samsung_power_state(&text).unwrap_or(false);
+            }
+        }
+    }
+    false
+}
+
+fn check_sony_tv_power(tv_ip: &str) -> bool {
+    let url = format!("http://{}/sony/system", tv_ip);
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_millis(800))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let body = r#"{"method":"getPowerStatus","id":1,"params":[],"version":"1.0"}"#;
+    if let Ok(resp) = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+    {
+        if resp.status().is_success() {
+            if let Ok(text) = resp.text() {
+                return parse_sony_power_status(&text).unwrap_or(false);
+            }
+        }
+    }
+    false
+}
+
+/// Builds a masked RFC 6455 WebSocket text frame for sending small JSON payloads over raw TCP.
+fn build_masked_ws_frame(payload: &[u8]) -> Vec<u8> {
+    let mask_key: [u8; 4] = [0x37, 0xFA, 0x21, 0x3D];
+    let mut frame = Vec::with_capacity(10 + payload.len());
+    frame.push(0x81); // FIN + Text opcode
+    if payload.len() < 126 {
+        frame.push(0x80 | (payload.len() as u8));
+    } else {
+        frame.push(0x80 | 126);
+        let len_bytes = (payload.len() as u16).to_be_bytes();
+        frame.extend_from_slice(&len_bytes);
+    }
+    frame.extend_from_slice(&mask_key);
+    for (i, &b) in payload.iter().enumerate() {
+        frame.push(b ^ mask_key[i % 4]);
+    }
+    frame
+}
+
+fn check_lg_tv_power(tv_ip: &str) -> bool {
+    // LG webOS listens on TCP port 3000 (WS) and 3001 (WSS) while the TV is On,
+    // and closes the port when entering Standby / Power Off.
+    if let Ok(addr) = format!("{}:3000", tv_ip).parse::<SocketAddr>() {
+        if let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(650)) {
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(450)));
+            let _ = stream.set_write_timeout(Some(Duration::from_millis(450)));
+            let upgrade = format!(
+                "GET / HTTP/1.1\r\n\
+                 Host: {}:3000\r\n\
+                 Upgrade: websocket\r\n\
+                 Connection: Upgrade\r\n\
+                 Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+                 Sec-WebSocket-Version: 13\r\n\r\n",
+                tv_ip
+            );
+            if stream.write_all(upgrade.as_bytes()).is_ok() {
+                let mut buf = [0u8; 2048];
+                if let Ok(n) = stream.read(&mut buf) {
+                    let resp = String::from_utf8_lossy(&buf[..n]);
+                    if resp.contains("101") {
+                        // Query SSAP power state in case OLED "Screen Off" / "Active Standby" is active
+                        let ssap_req = br#"{"type":"request","id":"pwr_1","uri":"ssap://com.webos.service.tvpower/power/getPowerState"}"#;
+                        let frame = build_masked_ws_frame(ssap_req);
+                        if stream.write_all(&frame).is_ok() {
+                            if let Ok(n2) = stream.read(&mut buf) {
+                                let ws_text = String::from_utf8_lossy(&buf[..n2]);
+                                if let Some(state) = parse_lg_power_state(&ws_text) {
+                                    return state;
+                                }
+                            }
+                        }
+                        return true;
+                    }
+                }
+            }
+            return true;
+        }
+    }
+    // Fallback to TLS port 3001 reachability for newer webOS firmware that disables plain port 3000
+    if let Ok(addr) = format!("{}:3001", tv_ip).parse::<SocketAddr>() {
+        if TcpStream::connect_timeout(&addr, Duration::from_millis(550)).is_ok() {
+            return true;
+        }
+    }
+    false
+}
+
+fn check_vizio_tv_power(tv_ip: &str) -> bool {
+    let client = match reqwest::blocking::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .timeout(Duration::from_millis(800))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    for port in [7345u16, 9000u16] {
+        let url = format!("https://{}:{}/state/device/power_mode", tv_ip, port);
+        if let Ok(resp) = client.get(&url).send() {
+            if let Ok(text) = resp.text() {
+                if let Some(is_on) = parse_vizio_power_mode(&text) {
+                    return is_on;
+                }
+                // If Vizio SmartCast responds with PAIRING_DENIED / REQUIRES_PAIRING,
+                // the SmartCast daemon is awake and running (in Eco Mode, Vizio shuts down port 7345 when off)
+                if text.contains("PAIRING_DENIED") || text.contains("STATUS") {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+pub fn check_smart_tv_power_worker(
+    tv: &PairedTvInfo,
     tx: &Sender<BackgroundMessage>,
     ctx: &egui::Context,
 ) {
-    if tv_ip.is_empty() {
+    if tv.ip.is_empty() {
         return;
     }
-    let url = format!("http://{}:8001/api/v2/", tv_ip);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_millis(800))
-        .build();
-    let is_on = match client {
-        Ok(c) => match c.get(&url).send() {
-            Ok(resp) => {
-                if resp.status().is_success() {
-                    if let Ok(text) = resp.text() {
-                        if let Some(start) = text.find("\"name\":\"") {
-                            let sub = &text[start + 8..];
-                            if let Some(end) = sub.find('"') {
-                                let name = &sub[..end];
-                                let _ = tx.send(BackgroundMessage::SamsungTvDiscovered {
-                                    ip: tv_ip.to_string(),
-                                    name: name.to_string(),
-                                });
-                            }
-                        }
-                        text.contains("\"PowerState\":\"on\"") || text.contains("\"PowerState\": \"on\"")
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            }
-            Err(_) => false,
-        },
-        Err(_) => false,
+    let is_on = match tv.brand {
+        TvBrand::Samsung => check_samsung_tv_power(&tv.ip, tx),
+        TvBrand::Sony => check_sony_tv_power(&tv.ip),
+        TvBrand::Lg => check_lg_tv_power(&tv.ip),
+        TvBrand::Vizio => check_vizio_tv_power(&tv.ip),
     };
     let _ = tx.send(BackgroundMessage::TvPowerStateUpdated(is_on));
     ctx.request_repaint();
+}
+
+/// Probes a single IP address for a supported Smart TV (Samsung, LG, Vizio, or Sony).
+pub fn probe_smart_tv_at_ip(ip: &str) -> Option<PairedTvInfo> {
+    let timeout = Duration::from_millis(160);
+
+    // 1. Samsung Smart TV (Tizen REST API on port 8001)
+    if let Ok(addr) = format!("{}:8001", ip).parse::<SocketAddr>() {
+        if TcpStream::connect_timeout(&addr, timeout).is_ok() {
+            if let Ok(client) = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_millis(700))
+                .build()
+            {
+                let url = format!("http://{}:8001/api/v2/", ip);
+                if let Ok(resp) = client.get(&url).send() {
+                    if let Ok(text) = resp.text() {
+                        if text.contains("PowerState") || text.contains("modelName") {
+                            let name = parse_samsung_tv_name(&text)
+                                .unwrap_or_else(|| "Samsung Smart TV".to_string());
+                            return Some(PairedTvInfo {
+                                brand: TvBrand::Samsung,
+                                ip: ip.to_string(),
+                                name,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. LG webOS TV (SSAP WebSocket server on port 3000)
+    if let Ok(addr) = format!("{}:3000", ip).parse::<SocketAddr>() {
+        if let Ok(mut stream) = TcpStream::connect_timeout(&addr, timeout) {
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(450)));
+            let _ = stream.set_write_timeout(Some(Duration::from_millis(450)));
+            let upgrade = format!(
+                "GET / HTTP/1.1\r\n\
+                 Host: {}:3000\r\n\
+                 Upgrade: websocket\r\n\
+                 Connection: Upgrade\r\n\
+                 Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+                 Sec-WebSocket-Version: 13\r\n\r\n",
+                ip
+            );
+            if stream.write_all(upgrade.as_bytes()).is_ok() {
+                let mut buf = [0u8; 1024];
+                if let Ok(n) = stream.read(&mut buf) {
+                    let resp = String::from_utf8_lossy(&buf[..n]);
+                    if resp.contains("101") && resp.to_lowercase().contains("websocket") {
+                        return Some(PairedTvInfo {
+                            brand: TvBrand::Lg,
+                            ip: ip.to_string(),
+                            name: "LG webOS TV".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Vizio SmartCast TV (HTTPS API on port 7345)
+    if let Ok(addr) = format!("{}:7345", ip).parse::<SocketAddr>() {
+        if TcpStream::connect_timeout(&addr, timeout).is_ok() {
+            if let Ok(client) = reqwest::blocking::Client::builder()
+                .danger_accept_invalid_certs(true)
+                .timeout(Duration::from_millis(700))
+                .build()
+            {
+                let mut friendly_name = "Vizio SmartCast TV".to_string();
+                let desc_url = format!("http://{}:8008/ssdp/device-desc.xml", ip);
+                if let Ok(resp) = client.get(&desc_url).send() {
+                    if let Ok(xml) = resp.text() {
+                        if let (Some(s), Some(e)) = (xml.find("<friendlyName>"), xml.find("</friendlyName>")) {
+                            if e > s + 14 {
+                                friendly_name = xml[s + 14..e].trim().to_string();
+                            }
+                        }
+                    }
+                }
+                return Some(PairedTvInfo {
+                    brand: TvBrand::Vizio,
+                    ip: ip.to_string(),
+                    name: friendly_name,
+                });
+            }
+        }
+    }
+
+    // 4. Sony Bravia TV (JSON-RPC on port 80 /sony/system)
+    if let Ok(addr) = format!("{}:80", ip).parse::<SocketAddr>() {
+        if TcpStream::connect_timeout(&addr, timeout).is_ok() {
+            if let Ok(client) = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_millis(700))
+                .build()
+            {
+                let url = format!("http://{}/sony/system", ip);
+                let body = r#"{"method":"getInterfaceInformation","id":1,"params":[],"version":"1.0"}"#;
+                if let Ok(resp) = client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .body(body)
+                    .send()
+                {
+                    if resp.status().is_success() {
+                        if let Ok(text) = resp.text() {
+                            if let Some(name) = parse_sony_model_name(&text) {
+                                return Some(PairedTvInfo {
+                                    brand: TvBrand::Sony,
+                                    ip: ip.to_string(),
+                                    name,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 pub fn fetch_device_stats_worker(
@@ -539,9 +897,53 @@ mod tests {
     #[test]
     fn test_parse_samsung_tv_power_state() {
         let on_payload = r#"{"device":{"PowerState":"on","modelName":"UN75TU700DFXZA","name":"[TV] Livingroom TV"}}"#;
-        assert!(on_payload.contains("\"PowerState\":\"on\""));
+        assert_eq!(parse_samsung_power_state(on_payload), Some(true));
+        assert_eq!(
+            parse_samsung_tv_name(on_payload),
+            Some("[TV] Livingroom TV".to_string())
+        );
 
         let standby_payload = r#"{"device":{"PowerState":"standby","modelName":"UN75TU700DFXZA"}}"#;
-        assert!(!standby_payload.contains("\"PowerState\":\"on\""));
+        assert_eq!(parse_samsung_power_state(standby_payload), Some(false));
+        assert_eq!(
+            parse_samsung_tv_name(standby_payload),
+            Some("UN75TU700DFXZA".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_sony_bravia_power_status() {
+        let active_json = r#"{"result":[{"status":"active"}],"id":1}"#;
+        assert_eq!(parse_sony_power_status(active_json), Some(true));
+
+        let standby_json = r#"{"result":[{"status":"standby"}],"id":1}"#;
+        assert_eq!(parse_sony_power_status(standby_json), Some(false));
+
+        let info_json = r#"{"result":[{"productCategory":"tv","productName":"BRAVIA","modelName":"XR-65A80K","InterfaceVersion":"7.0.0"}],"id":1}"#;
+        assert_eq!(
+            parse_sony_model_name(info_json),
+            Some("Sony BRAVIA (XR-65A80K)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_lg_webos_power_state() {
+        let active_ssap = r#"{"type":"response","id":"pwr_1","payload":{"state":"Active","returnValue":true}}"#;
+        assert_eq!(parse_lg_power_state(active_ssap), Some(true));
+
+        let screen_off_ssap = r#"{"type":"response","id":"pwr_1","payload":{"state":"Screen Off","returnValue":true}}"#;
+        assert_eq!(parse_lg_power_state(screen_off_ssap), Some(false));
+
+        let standby_ssap = r#"{"type":"response","id":"pwr_1","payload":{"state":"Active Standby","returnValue":true}}"#;
+        assert_eq!(parse_lg_power_state(standby_ssap), Some(false));
+    }
+
+    #[test]
+    fn test_parse_vizio_smartcast_power_mode() {
+        let on_json = r#"{"STATUS":{"RESULT":"SUCCESS","DETAIL":"Success"},"ITEMS":[{"CNAME":"power_mode","TYPE":"T_VALUE_V1","NAME":"Power Mode","VALUE":1}]}"#;
+        assert_eq!(parse_vizio_power_mode(on_json), Some(true));
+
+        let off_json = r#"{"STATUS":{"RESULT":"SUCCESS","DETAIL":"Success"},"ITEMS":[{"CNAME":"power_mode","TYPE":"T_VALUE_V1","NAME":"Power Mode","VALUE":0}]}"#;
+        assert_eq!(parse_vizio_power_mode(off_json), Some(false));
     }
 }
