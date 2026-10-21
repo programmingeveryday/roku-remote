@@ -167,22 +167,6 @@ pub fn get_icon_cache_dir() -> std::path::PathBuf {
     cache_dir
 }
 
-pub fn load_cached_tv_power_state() -> Option<bool> {
-    let cache_file = get_icon_cache_dir().join("tv_power_state.txt");
-    std::fs::read_to_string(cache_file)
-        .ok()
-        .and_then(|s| match s.trim().to_lowercase().as_str() {
-            "true" | "1" | "on" => Some(true),
-            "false" | "0" | "off" => Some(false),
-            _ => None,
-        })
-}
-
-pub fn save_cached_tv_power_state(is_on: bool) {
-    let cache_file = get_icon_cache_dir().join("tv_power_state.txt");
-    let _ = std::fs::write(cache_file, if is_on { "true" } else { "false" });
-}
-
 pub fn load_app_icon_worker(ip: &str, app_id: &str, tx: &Sender<BackgroundMessage>, ctx: &egui::Context) {
     let cache_file = get_icon_cache_dir().join(format!("{}.img", app_id));
 

@@ -124,6 +124,7 @@ impl RokuRemoteApp {
             }
         });
 
+        let initial_apps = crate::roku::client::load_cached_apps().unwrap_or_default();
         let app = Self {
             devices: Vec::new(),
             selected_device_ip: initial_ip,
@@ -135,15 +136,13 @@ impl RokuRemoteApp {
             media_player: MediaPlayerInfo::default(),
             device_details: DeviceDetails::default(),
             is_device_reachable: false,
-            tv_powered_on: Arc::new(AtomicBool::new(
-                crate::roku::client::load_cached_tv_power_state().unwrap_or(false),
-            )),
+            tv_powered_on: Arc::new(AtomicBool::new(true)),
             active_screensaver: None,
             show_device_info: false,
             show_device_stats: false,
             show_setup_guide: false,
             manual_ip_mode: false,
-            apps: Vec::new(),
+            apps: initial_apps.clone(),
             app_textures: HashMap::new(),
             pending_icons: Vec::new(),
             is_scanning: true,
@@ -163,6 +162,9 @@ impl RokuRemoteApp {
             tx,
         };
 
+        if !initial_apps.is_empty() {
+            app.fetch_app_icons(&initial_apps);
+        }
         app.start_discovery_scan();
         app.refresh_device_info();
 
@@ -182,6 +184,7 @@ impl RokuRemoteApp {
         // Clear previous applications so we don't display stale apps
         self.apps.clear();
         self.app_textures.clear();
+        self.active_screensaver = None;
         self.is_refreshing_apps = true;
         self.refresh_device_info();
     }
@@ -203,6 +206,7 @@ impl RokuRemoteApp {
                     guard.clone()
                 };
                 if !ip.is_empty() {
+                    update_active_app_worker(&ip, &tx, &ctx);
                     update_media_player_worker(&ip, &tx, &ctx);
                 }
             }
@@ -215,7 +219,6 @@ impl RokuRemoteApp {
 
     pub fn set_tv_power_state(&self, is_on: bool) {
         self.tv_powered_on.store(is_on, Ordering::Relaxed);
-        crate::roku::client::save_cached_tv_power_state(is_on);
     }
 
     pub fn replay(&self) {
@@ -993,14 +996,6 @@ impl RokuRemoteApp {
         self.status_text = "Refreshing device & scanning network...".into();
         self.start_discovery_scan();
         self.refresh_device_info();
-        if !self.selected_device_ip.is_empty() {
-            let ip = self.selected_device_ip.clone();
-            let tx = self.tx.clone();
-            let ctx = self.ctx.clone();
-            thread::spawn(move || {
-                refresh_apps_worker(&ip, &tx, &ctx);
-            });
-        }
     }
 
     pub fn refresh_device_info(&self) {
@@ -1098,8 +1093,14 @@ impl RokuRemoteApp {
                 }
                 BackgroundMessage::AppsRefreshFailed => {
                     self.is_refreshing_apps = false;
-                    self.apps.clear();
-                    self.app_textures.clear();
+                    if self.apps.is_empty() {
+                        if let Some(cached) = crate::roku::client::load_cached_apps() {
+                            let count = cached.len();
+                            self.fetch_app_icons(&cached);
+                            self.apps = cached;
+                            self.status_text = format!("Loaded {} cached apps (offline)", count);
+                        }
+                    }
                 }
                 BackgroundMessage::ScanFinished => {
                     self.is_scanning = false;
