@@ -135,35 +135,63 @@ pub fn parse_media_player_xml(xml: &str) -> MediaPlayerInfo {
         info.app_name = name;
     }
 
-    // Bandwidth: <plugin ... bandwidth="97372298 bps" /> or bitrate in stream_segment
-    if let Some(bw_str) = extract_attr("plugin", "bandwidth") {
+    // Bandwidth: <plugin ... bandwidth="97372298 bps" /> or <bandwidth>...</bandwidth>
+    if let Some(bw_str) = extract_attr("plugin", "bandwidth").or_else(|| extract_tag("bandwidth")) {
         let cleaned = bw_str.trim().trim_end_matches(" bps").trim();
         if let Ok(bps) = cleaned.parse::<u64>() {
-            info.bandwidth_bps = Some(bps);
+            if bps > 0 {
+                info.bandwidth_bps = Some(bps);
+            }
         }
     }
 
     // Video bitrate: <stream_segment ... bitrate="15136323" />
-    if let Some(br_str) = extract_attr("stream_segment", "bitrate") {
+    if let Some(br_str) = extract_attr("stream_segment", "bitrate").or_else(|| extract_attr("format", "bitrate")) {
         let cleaned = br_str.trim().trim_end_matches(" bps").trim();
         if let Ok(bps) = cleaned.parse::<u64>() {
-            info.video_bitrate_bps = Some(bps);
+            if bps > 0 {
+                info.video_bitrate_bps = Some(bps);
+            }
         }
     }
 
     // Resolution: from stream_segment width & height, or format video_res
-    let width = extract_attr("stream_segment", "width");
-    let height = extract_attr("stream_segment", "height");
+    let width = extract_attr("stream_segment", "width").or_else(|| extract_attr("format", "width"));
+    let height = extract_attr("stream_segment", "height").or_else(|| extract_attr("format", "height"));
     if let (Some(w), Some(h)) = (width, height) {
-        let label = match (w.as_str(), h.as_str()) {
-            ("3840", "2160") => " (4K UHD)",
-            ("1920", "1080") => " (1080p FHD)",
-            ("1280", "720") => " (720p HD)",
-            _ => "",
-        };
-        info.video_res = format!("{}x{}{}", w, h, label);
-    } else if let Some(vres) = extract_attr("format", "video_res") {
-        info.video_res = vres;
+        let w_num = w.parse::<u32>().unwrap_or(0);
+        let h_num = h.parse::<u32>().unwrap_or(0);
+        if w_num > 0 && h_num > 0 {
+            let label = match (w.as_str(), h.as_str()) {
+                ("3840", "2160") => " (4K UHD)",
+                ("2560", "1440") => " (1440p QHD)",
+                ("1920", "1080") => " (1080p FHD)",
+                ("1280", "720") => " (720p HD)",
+                ("854", "480") | ("720", "480") => " (480p SD)",
+                _ => "",
+            };
+            info.video_res = format!("{}x{}{}", w, h, label);
+        }
+    }
+    if info.video_res.is_empty() {
+        if let Some(vres) = extract_attr("format", "video_res") {
+            let trimmed = vres.trim();
+            if !trimmed.is_empty() && trimmed != "0" && trimmed != "0x0" && !trimmed.eq_ignore_ascii_case("unknown") {
+                let label = match trimmed {
+                    "3840x2160" | "4k" | "4K" => " (4K UHD)",
+                    "1920x1080" | "1080p" => " (1080p FHD)",
+                    "1280x720" | "720p" => " (720p HD)",
+                    _ => "",
+                };
+                if label.is_empty() {
+                    info.video_res = trimmed.to_string();
+                } else if !trimmed.contains('(') {
+                    info.video_res = format!("{}{}", trimmed, label);
+                } else {
+                    info.video_res = trimmed.to_string();
+                }
+            }
+        }
     }
 
     // Video Codec: <format video="hevc_b" ...>
@@ -349,6 +377,13 @@ mod tests {
         assert_eq!(p_info.app_name, "Netflix");
         assert_eq!(p_info.position_ms, Some(5000));
         assert_eq!(p_info.is_live, false);
+
+        // Zero values during stream startup/buffering should not result in 0 or 0x0
+        let zero_sample = "<player state=\"play\"><plugin name=\"Paramount\" bandwidth=\"0 bps\" /><stream_segment bitrate=\"0\" width=\"0\" height=\"0\" /></player>";
+        let z_info = parse_media_player_xml(zero_sample);
+        assert_eq!(z_info.video_res, "");
+        assert_eq!(z_info.video_bitrate_bps, None);
+        assert_eq!(z_info.bandwidth_bps, None);
     }
 
     #[test]

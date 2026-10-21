@@ -4,7 +4,7 @@ use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::models::{BackgroundMessage, RokuDevice};
+use crate::models::{BackgroundMessage, MediaPlayerInfo, RokuDevice};
 use crate::roku::parser::{
     clean_html_entities, parse_active_app_xml, parse_apps_xml,
     parse_device_details_xml, parse_device_name_xml,
@@ -352,22 +352,81 @@ pub fn fetch_device_stats_worker(
         client.get(&url).send().ok().and_then(|r| r.text().ok()).unwrap_or_default()
     };
 
-    let media_xml = get_xml("media-player");
     let dev_xml = get_xml("device-info");
-
-    let media_player = if !media_xml.is_empty() {
-        Some(parse_media_player_xml(&media_xml))
-    } else {
-        None
-    };
     let device_details = if !dev_xml.is_empty() {
         Some(parse_device_details_xml(&dev_xml))
     } else {
         None
     };
 
+    // Multi-sample polling algorithm:
+    // When playback transitions between segments or streams start, Roku may temporarily
+    // report unmetered segments (missing resolution / bitrate). Query media-player up to 3 times
+    // spaced ~160ms apart, merging the best metrics and breaking as soon as complete telemetry is read.
+    let mut best_media_player: Option<MediaPlayerInfo> = None;
+    for attempt in 0..3 {
+        let media_xml = get_xml("media-player");
+        if !media_xml.is_empty() {
+            let parsed = parse_media_player_xml(&media_xml);
+            let has_res = !parsed.video_res.is_empty() && parsed.video_res != "0" && parsed.video_res != "0x0";
+            let has_bitrate = parsed.video_bitrate_bps.map_or(false, |b| b > 0);
+            let is_playing = parsed.state == "play";
+
+            if let Some(ref mut best) = best_media_player {
+                if has_res {
+                    best.video_res = parsed.video_res.clone();
+                }
+                if has_bitrate {
+                    best.video_bitrate_bps = parsed.video_bitrate_bps;
+                }
+                if parsed.bandwidth_bps.map_or(false, |b| b > 0) {
+                    best.bandwidth_bps = parsed.bandwidth_bps;
+                }
+                if !parsed.video_codec.is_empty() {
+                    best.video_codec = parsed.video_codec.clone();
+                }
+                if !parsed.audio_codec.is_empty() {
+                    best.audio_codec = parsed.audio_codec.clone();
+                }
+                if !parsed.container.is_empty() {
+                    best.container = parsed.container.clone();
+                }
+                if !parsed.captions.is_empty() {
+                    best.captions = parsed.captions.clone();
+                }
+                if !parsed.drm.is_empty() {
+                    best.drm = parsed.drm.clone();
+                }
+                if parsed.buffer_current.is_some() {
+                    best.buffer_current = parsed.buffer_current;
+                }
+                if parsed.buffer_max.is_some() {
+                    best.buffer_max = parsed.buffer_max;
+                }
+                if parsed.position_ms.is_some() {
+                    best.position_ms = parsed.position_ms;
+                }
+                if parsed.duration_ms.is_some() {
+                    best.duration_ms = parsed.duration_ms;
+                }
+                best.state = parsed.state.clone();
+                best.is_live = parsed.is_live;
+            } else {
+                best_media_player = Some(parsed);
+            }
+
+            // If we have full stream diagnostics (resolution + bitrate) while playing, we have high fidelity
+            if is_playing && has_res && has_bitrate {
+                break;
+            }
+        }
+        if attempt < 2 {
+            thread::sleep(Duration::from_millis(160));
+        }
+    }
+
     let _ = tx.send(BackgroundMessage::DeviceStatsUpdated {
-        media_player,
+        media_player: best_media_player,
         device_details,
     });
     ctx.request_repaint();

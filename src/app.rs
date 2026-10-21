@@ -31,6 +31,7 @@ pub struct RokuRemoteApp {
     pub is_device_reachable: bool,
     pub tv_powered_on: Arc<AtomicBool>,
     pub active_screensaver: Option<String>,
+    pub last_media_pos_instant: Option<std::time::Instant>,
     pub show_device_info: bool,
     pub show_device_stats: bool,
     pub show_setup_guide: bool,
@@ -138,6 +139,7 @@ impl RokuRemoteApp {
             is_device_reachable: false,
             tv_powered_on: Arc::new(AtomicBool::new(true)),
             active_screensaver: None,
+            last_media_pos_instant: None,
             show_device_info: false,
             show_device_stats: false,
             show_setup_guide: false,
@@ -531,13 +533,24 @@ impl RokuRemoteApp {
     pub fn render_device_stats_content(&mut self, ui: &mut egui::Ui, _content_width: f32) {
         ui.spacing_mut().item_spacing = egui::vec2(8.0, 10.0);
 
-        // Header Row
+        // Header Row - Action Toolbar (Window title is displayed in the window title bar)
         ui.horizontal(|ui| {
-            ui.heading(
-                egui::RichText::new("📊 Roku Device & Stream Stats")
-                    .color(self.theme.foreground)
-                    .size(16.0),
+            let last_str = if let Some(last) = self.device_stats.last_updated {
+                let secs = last.elapsed().as_secs();
+                if secs == 0 {
+                    "Live Diagnostics • Just now".to_string()
+                } else {
+                    format!("Live Diagnostics • {}s ago", secs)
+                }
+            } else {
+                "Live Stream Diagnostics".to_string()
+            };
+            ui.label(
+                egui::RichText::new(last_str)
+                    .size(11.5)
+                    .color(self.theme.dark_foreground),
             );
+
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Close (Esc)").clicked() {
                     self.show_device_stats = false;
@@ -675,14 +688,21 @@ impl RokuRemoteApp {
 
                             // Video Bitrate
                             if let Some(bps) = self.media_player.video_bitrate_bps {
-                                let br_str = format!("{:.1} Mbps", (bps as f32) / 1_000_000.0);
-                                row("Video Bitrate:", &br_str);
+                                if bps > 0 {
+                                    let br_str = format!("{:.1} Mbps ({} bps)", (bps as f32) / 1_000_000.0, bps);
+                                    row("Video Bitrate:", &br_str);
+                                }
                             }
 
                             // Resolution
-                            if !self.media_player.video_res.is_empty() {
-                                row("Stream Resolution:", &self.media_player.video_res);
-                            }
+                            let res_display = if !self.media_player.video_res.is_empty() && self.media_player.video_res != "0" && self.media_player.video_res != "0x0" {
+                                self.media_player.video_res.clone()
+                            } else if !self.device_details.ui_resolution.is_empty() {
+                                format!("{} (Display Output)", self.device_details.ui_resolution)
+                            } else {
+                                "Detecting stream resolution...".to_string()
+                            };
+                            row("Stream Resolution:", &res_display);
 
                             // Video Codec
                             if !self.media_player.video_codec.is_empty() {
@@ -1118,28 +1138,54 @@ impl RokuRemoteApp {
                     if info.state == "play" {
                         self.set_tv_power_state(true);
                     }
-                    // Continually update playback state & position without overwriting snapshot stats
-                    self.media_player.state = info.state;
-                    self.media_player.position_ms = info.position_ms;
-                    self.media_player.duration_ms = info.duration_ms;
+                    self.media_player.state = info.state.clone();
+                    if info.position_ms.is_some() {
+                        self.media_player.position_ms = info.position_ms;
+                        self.last_media_pos_instant = Some(Instant::now());
+                    }
+                    if info.duration_ms.is_some() {
+                        self.media_player.duration_ms = info.duration_ms;
+                    }
                     self.media_player.is_live = info.is_live;
                     if !info.app_name.is_empty() {
                         self.media_player.app_name = info.app_name;
                     }
-                    if self.media_player.video_res.is_empty() && !info.video_res.is_empty() {
+                    if !info.video_res.is_empty() && info.video_res != "0" && info.video_res != "0x0" {
                         self.media_player.video_res = info.video_res;
                     }
-                    if self.media_player.video_codec.is_empty() && !info.video_codec.is_empty() {
+                    if !info.video_codec.is_empty() {
                         self.media_player.video_codec = info.video_codec;
                     }
-                    if self.media_player.audio_codec.is_empty() && !info.audio_codec.is_empty() {
+                    if !info.audio_codec.is_empty() {
                         self.media_player.audio_codec = info.audio_codec;
                     }
-                    if self.media_player.container.is_empty() && !info.container.is_empty() {
+                    if !info.container.is_empty() {
                         self.media_player.container = info.container;
                     }
-                    if self.media_player.bandwidth_bps.is_none() && info.bandwidth_bps.is_some() {
-                        self.media_player.bandwidth_bps = info.bandwidth_bps;
+                    if let Some(bps) = info.bandwidth_bps {
+                        if bps > 0 {
+                            self.media_player.bandwidth_bps = Some(bps);
+                        }
+                    }
+                    if let Some(bps) = info.video_bitrate_bps {
+                        if bps > 0 {
+                            self.media_player.video_bitrate_bps = Some(bps);
+                        }
+                    }
+                    if info.buffer_current.is_some() {
+                        self.media_player.buffer_current = info.buffer_current;
+                    }
+                    if info.buffer_max.is_some() {
+                        self.media_player.buffer_max = info.buffer_max;
+                    }
+                    if !info.captions.is_empty() {
+                        self.media_player.captions = info.captions;
+                    }
+                    if !info.drm.is_empty() {
+                        self.media_player.drm = info.drm;
+                    }
+                    if info.state == "close" || info.state == "none" {
+                        self.last_media_pos_instant = None;
                     }
                 }
                 BackgroundMessage::DeviceDetailsUpdated(details) => {
@@ -1179,7 +1225,52 @@ impl RokuRemoteApp {
                         if mp.state == "play" {
                             self.set_tv_power_state(true);
                         }
-                        self.media_player = mp;
+                        self.media_player.state = mp.state;
+                        if mp.position_ms.is_some() {
+                            self.media_player.position_ms = mp.position_ms;
+                            self.last_media_pos_instant = Some(Instant::now());
+                        }
+                        if mp.duration_ms.is_some() {
+                            self.media_player.duration_ms = mp.duration_ms;
+                        }
+                        self.media_player.is_live = mp.is_live;
+                        if !mp.app_name.is_empty() {
+                            self.media_player.app_name = mp.app_name;
+                        }
+                        if !mp.video_res.is_empty() && mp.video_res != "0" && mp.video_res != "0x0" {
+                            self.media_player.video_res = mp.video_res;
+                        }
+                        if !mp.video_codec.is_empty() {
+                            self.media_player.video_codec = mp.video_codec;
+                        }
+                        if !mp.audio_codec.is_empty() {
+                            self.media_player.audio_codec = mp.audio_codec;
+                        }
+                        if !mp.container.is_empty() {
+                            self.media_player.container = mp.container;
+                        }
+                        if let Some(bps) = mp.bandwidth_bps {
+                            if bps > 0 {
+                                self.media_player.bandwidth_bps = Some(bps);
+                            }
+                        }
+                        if let Some(bps) = mp.video_bitrate_bps {
+                            if bps > 0 {
+                                self.media_player.video_bitrate_bps = Some(bps);
+                            }
+                        }
+                        if mp.buffer_current.is_some() {
+                            self.media_player.buffer_current = mp.buffer_current;
+                        }
+                        if mp.buffer_max.is_some() {
+                            self.media_player.buffer_max = mp.buffer_max;
+                        }
+                        if !mp.captions.is_empty() {
+                            self.media_player.captions = mp.captions;
+                        }
+                        if !mp.drm.is_empty() {
+                            self.media_player.drm = mp.drm;
+                        }
                     }
                 }
                 BackgroundMessage::PowerStateUpdated(reachable) => {
@@ -1216,8 +1307,195 @@ impl RokuRemoteApp {
         }
     }
 
+    pub fn render_playback_progress_bar(&mut self, ui: &mut egui::Ui, width: f32) {
+        let is_playing = self.media_player.state == "play";
+        let is_paused = self.media_player.state == "pause";
+        let has_duration = self.media_player.duration_ms.unwrap_or(0) > 0;
+        let is_active = is_playing || is_paused || has_duration;
+
+        if !is_active {
+            return;
+        }
+
+        let raw_pos = self.media_player.position_ms.unwrap_or(0);
+        let dur = self.media_player.duration_ms.unwrap_or(0);
+
+        let current_pos_ms = if is_playing {
+            ui.ctx().request_repaint_after(Duration::from_millis(500));
+            if let Some(last) = self.last_media_pos_instant {
+                let delta = last.elapsed().as_millis() as u64;
+                if dur > 0 {
+                    (raw_pos + delta).min(dur)
+                } else {
+                    raw_pos + delta
+                }
+            } else {
+                raw_pos
+            }
+        } else {
+            raw_pos
+        };
+
+        let card_w = (width - 16.0).max(220.0);
+        let mut open_stats = false;
+
+        ui.allocate_ui_with_layout(
+            egui::vec2(card_w, 0.0),
+            egui::Layout::top_down(egui::Align::Center),
+            |ui| {
+                egui::Frame::none()
+                    .fill(self.theme.lighter_background)
+                    .rounding(6.0)
+                    .stroke(egui::Stroke::new(1.0_f32, self.theme.background))
+                    .inner_margin(egui::Margin::symmetric(10.0, 7.0))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+
+                        // Header Row: App Name & Playback Status
+                        ui.horizontal(|ui| {
+                            let app_title = if !self.media_player.app_name.is_empty() {
+                                &self.media_player.app_name
+                            } else if !self.active_app.is_empty() && !self.active_app.eq_ignore_ascii_case("roku dynamic menu") {
+                                &self.active_app
+                            } else {
+                                "Now Playing"
+                            };
+                            ui.label(
+                                egui::RichText::new(app_title)
+                                    .strong()
+                                    .size(11.5)
+                                    .color(self.theme.foreground),
+                            );
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                let (status_str, status_color) = if self.media_player.is_live {
+                                    ("🔴 Live", egui::Color32::from_rgb(231, 76, 60))
+                                } else if is_playing {
+                                    ("▶ Playing", egui::Color32::from_rgb(46, 204, 113))
+                                } else if is_paused {
+                                    ("⏸ Paused", egui::Color32::from_rgb(241, 196, 15))
+                                } else {
+                                    ("⏳ Buffering", egui::Color32::from_rgb(52, 152, 219))
+                                };
+                                ui.label(
+                                    egui::RichText::new(status_str)
+                                        .strong()
+                                        .size(11.0)
+                                        .color(status_color),
+                                );
+                            });
+                        });
+
+                        ui.add_space(4.0);
+
+                        // Progress Bar Row
+                        let progress_fraction = if dur > 0 {
+                            (current_pos_ms as f32 / dur as f32).clamp(0.0, 1.0)
+                        } else {
+                            1.0
+                        };
+
+                        let bar_height = 5.0f32;
+                        let (bar_rect, bar_response) = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), bar_height),
+                            egui::Sense::click(),
+                        );
+                        let bar_tip = "Playback Progress (Click to view full stream telemetry)";
+                        if bar_response.on_hover_text(bar_tip).clicked() {
+                            open_stats = true;
+                        }
+
+                        // Background track
+                        ui.painter().rect_filled(
+                            bar_rect,
+                            2.5,
+                            egui::Color32::from_rgba_unmultiplied(35, 35, 45, 220),
+                        );
+
+                        // Filled portion
+                        if progress_fraction > 0.0 {
+                            let filled_w = (bar_rect.width() * progress_fraction).max(3.0);
+                            let filled_rect = egui::Rect::from_min_size(
+                                bar_rect.min,
+                                egui::vec2(filled_w, bar_height),
+                            );
+                            ui.painter().rect_filled(filled_rect, 2.5, self.theme.accent);
+                        }
+
+                        ui.add_space(3.0);
+
+                        // Time Labels Row
+                        ui.horizontal(|ui| {
+                            if dur > 0 {
+                                let pos_s = current_pos_ms / 1000;
+                                let dur_s = dur / 1000;
+                                let rem_s = dur_s.saturating_sub(pos_s);
+
+                                let pos_str = if dur_s >= 3600 {
+                                    format!("{}:{:02}:{:02}", pos_s / 3600, (pos_s % 3600) / 60, pos_s % 60)
+                                } else {
+                                    format!("{}:{:02}", pos_s / 60, pos_s % 60)
+                                };
+
+                                let rem_str = if rem_s >= 3600 {
+                                    format!("-{}:{:02}:{:02} left", rem_s / 3600, (rem_s % 3600) / 60, rem_s % 60)
+                                } else {
+                                    format!("-{}:{:02} left", rem_s / 60, rem_s % 60)
+                                };
+
+                                let pct_str = format!("{:.0}%", progress_fraction * 100.0);
+
+                                ui.label(
+                                    egui::RichText::new(pos_str)
+                                        .size(10.5)
+                                        .color(self.theme.foreground),
+                                );
+                                ui.label(
+                                    egui::RichText::new(format!("• {}", pct_str))
+                                        .size(10.0)
+                                        .color(self.theme.dark_foreground),
+                                );
+
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    ui.label(
+                                        egui::RichText::new(rem_str)
+                                            .size(10.5)
+                                            .strong()
+                                            .color(self.theme.foreground),
+                                    );
+                                });
+                            } else {
+                                let pos_s = current_pos_ms / 1000;
+                                let pos_str = format!("{}:{:02}", pos_s / 60, pos_s % 60);
+                                ui.label(
+                                    egui::RichText::new(pos_str)
+                                        .size(10.5)
+                                        .color(self.theme.foreground),
+                                );
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    ui.label(
+                                        egui::RichText::new("Live Stream")
+                                            .size(10.5)
+                                            .color(self.theme.dark_foreground),
+                                    );
+                                });
+                            }
+                        });
+                    });
+            },
+        );
+
+        if open_stats {
+            self.show_device_stats = true;
+        }
+
+        ui.add_space(8.0);
+    }
+
     pub fn render_controls_section(&mut self, ui: &mut egui::Ui, width: f32) {
         ui.vertical_centered(|ui| {
+            self.render_playback_progress_bar(ui, width);
+
             let btn_dir = egui::vec2(58.0, 40.0);
             let btn_ok = egui::vec2(66.0, 42.0);
             let btn_nav = egui::vec2(76.0, 36.0);
@@ -3552,7 +3830,9 @@ impl eframe::App for RokuRemoteApp {
 
                         // Align remote controls with where the app buttons begin on the right
                         let top_padding: f32 = ui.ctx().data_mut(|d| d.get_temp(offset_id)).unwrap_or(34.0);
-                        ui.add_space(top_padding);
+                        let is_playback_active = self.media_player.state == "play" || self.media_player.state == "pause" || self.media_player.duration_ms.unwrap_or(0) > 0;
+                        let pad = if is_playback_active { 0.0 } else { top_padding };
+                        ui.add_space(pad);
 
                         self.render_controls_section(ui, controls_width);
                     });
