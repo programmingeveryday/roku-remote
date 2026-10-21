@@ -137,7 +137,7 @@ impl RokuRemoteApp {
             media_player: MediaPlayerInfo::default(),
             device_details: DeviceDetails::default(),
             is_device_reachable: false,
-            tv_powered_on: Arc::new(AtomicBool::new(true)),
+            tv_powered_on: Arc::new(AtomicBool::new(false)),
             active_screensaver: None,
             last_media_pos_instant: None,
             show_device_info: false,
@@ -3408,7 +3408,7 @@ impl eframe::App for RokuRemoteApp {
             } else if self.active_screensaver.is_some() || self.active_app.eq_ignore_ascii_case("power saver") {
                 (egui::Color32::from_rgb(230, 160, 30), "Suspended")
             } else {
-                (egui::Color32::from_rgb(220, 60, 50), "Standby")
+                (egui::Color32::from_rgb(230, 160, 30), "Standby")
             };
 
             let state_icon = match self.media_player.state.as_str() {
