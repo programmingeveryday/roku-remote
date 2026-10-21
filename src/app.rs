@@ -30,6 +30,7 @@ pub struct RokuRemoteApp {
     pub device_details: DeviceDetails,
     pub is_device_reachable: bool,
     pub tv_powered_on: Arc<AtomicBool>,
+    pub active_screensaver: Option<String>,
     pub show_device_info: bool,
     pub show_device_stats: bool,
     pub show_setup_guide: bool,
@@ -134,7 +135,10 @@ impl RokuRemoteApp {
             media_player: MediaPlayerInfo::default(),
             device_details: DeviceDetails::default(),
             is_device_reachable: false,
-            tv_powered_on: Arc::new(AtomicBool::new(true)),
+            tv_powered_on: Arc::new(AtomicBool::new(
+                crate::roku::client::load_cached_tv_power_state().unwrap_or(false),
+            )),
+            active_screensaver: None,
             show_device_info: false,
             show_device_stats: false,
             show_setup_guide: false,
@@ -178,7 +182,6 @@ impl RokuRemoteApp {
         // Clear previous applications so we don't display stale apps
         self.apps.clear();
         self.app_textures.clear();
-        self.tv_powered_on.store(true, Ordering::Relaxed);
         self.is_refreshing_apps = true;
         self.refresh_device_info();
     }
@@ -210,8 +213,13 @@ impl RokuRemoteApp {
         start_scan(self.tx.clone(), self.ctx.clone());
     }
 
+    pub fn set_tv_power_state(&self, is_on: bool) {
+        self.tv_powered_on.store(is_on, Ordering::Relaxed);
+        crate::roku::client::save_cached_tv_power_state(is_on);
+    }
+
     pub fn replay(&self) {
-        self.tv_powered_on.store(true, Ordering::Relaxed);
+        self.set_tv_power_state(true);
         let ip = self.selected_device_ip.clone();
         let tx = self.tx.clone();
         let ctx = self.ctx.clone();
@@ -242,7 +250,7 @@ impl RokuRemoteApp {
             return;
         }
         if key != "Power" && key != "PowerOff" {
-            self.tv_powered_on.store(true, Ordering::Relaxed);
+            self.set_tv_power_state(true);
         }
         let ip = self.selected_device_ip.clone();
         let tx = self.tx.clone();
@@ -265,7 +273,7 @@ impl RokuRemoteApp {
         if text.is_empty() && !submit_enter {
             return;
         }
-        self.tv_powered_on.store(true, Ordering::Relaxed);
+        self.set_tv_power_state(true);
         let ip = self.selected_device_ip.clone();
         let text = text.to_string();
         let tx = self.tx.clone();
@@ -305,12 +313,12 @@ impl RokuRemoteApp {
         if ch == '\r' || ch == '\n' {
             return;
         }
-        self.tv_powered_on.store(true, Ordering::Relaxed);
+        self.set_tv_power_state(true);
         let _ = self.live_key_tx.send(LiveKeyCommand::Char(ch));
     }
 
     pub fn send_backspace_fast(&self) {
-        self.tv_powered_on.store(true, Ordering::Relaxed);
+        self.set_tv_power_state(true);
         let _ = self.live_key_tx.send(LiveKeyCommand::Backspace);
     }
 
@@ -318,12 +326,12 @@ impl RokuRemoteApp {
         if count == 0 {
             return;
         }
-        self.tv_powered_on.store(true, Ordering::Relaxed);
+        self.set_tv_power_state(true);
         let _ = self.live_key_tx.send(LiveKeyCommand::Clear(count));
     }
 
     pub fn send_live_key(&self, key: &'static str) {
-        self.tv_powered_on.store(true, Ordering::Relaxed);
+        self.set_tv_power_state(true);
         let _ = self.live_key_tx.send(LiveKeyCommand::Key(key));
     }
 
@@ -833,8 +841,43 @@ impl RokuRemoteApp {
         self.render_device_stats_content(ui, content_width);
     }
 
+    pub fn is_system_powered_on(&self) -> bool {
+        if !self.is_device_reachable {
+            return false;
+        }
+
+        // If screensaver is running or active app is "Power Saver", system is in suspension
+        if let Some(ref ssvr) = self.active_screensaver {
+            if !ssvr.is_empty() {
+                return false;
+            }
+        }
+        if self.active_app.eq_ignore_ascii_case("power saver") {
+            return false;
+        }
+
+        // Check power-mode tag from Roku device-info
+        let pm = self.device_details.power_mode.to_lowercase();
+        if pm == "poweroff" || pm == "standby" || pm == "displayoff" || pm == "ready" || pm == "suspend" {
+            return false;
+        }
+
+        if self.device_details.is_tv {
+            pm == "poweron"
+        } else {
+            // For streaming sticks / players:
+            // If media is actively playing, the TV is definitely on
+            if self.media_player.state == "play" {
+                return true;
+            }
+            // Otherwise follow the tracked/persisted TV power state
+            self.tv_powered_on.load(Ordering::Relaxed)
+        }
+    }
+
     pub fn power_on(&mut self) {
-        self.tv_powered_on.store(true, Ordering::Relaxed);
+        self.set_tv_power_state(true);
+        self.active_screensaver = None;
         if self.device_details.is_tv {
             self.device_details.power_mode = "PowerOn".to_string();
         }
@@ -849,26 +892,21 @@ impl RokuRemoteApp {
                 .build();
 
             if let Ok(ref c) = client {
-                if is_tv {
-                    let url = format!("http://{}:8060/keypress/PowerOn", ip);
-                    let mut sent = false;
-                    if let Ok(resp) = c.post(&url).send() {
-                        if resp.status().is_success() {
-                            sent = true;
-                        }
+                // Try discrete PowerOn first
+                let poweron_url = format!("http://{}:8060/keypress/PowerOn", ip);
+                let mut sent = false;
+                if let Ok(resp) = c.post(&poweron_url).send() {
+                    if resp.status().is_success() {
+                        sent = true;
                     }
-                    if !sent {
-                        let fallback_url = format!("http://{}:8060/keypress/Power", ip);
-                        let _ = c.post(&fallback_url).send();
-                    }
-                } else {
-                    // For streaming sticks and players:
-                    // 1. Send Power toggle to signal TV via HDMI-CEC
-                    let power_url = format!("http://{}:8060/keypress/Power", ip);
-                    let _ = c.post(&power_url).send();
+                }
+                if !sent {
+                    let fallback_url = format!("http://{}:8060/keypress/Power", ip);
+                    let _ = c.post(&fallback_url).send();
+                }
 
-                    // 2. Wait 150ms and send Home to trigger HDMI-CEC 1-Touch Play (Image View On / Active Source)
-                    // This explicitly wakes the connected TV screen and switches to Roku input
+                // If streaming stick or player, send Home after 150ms to trigger HDMI-CEC 1-Touch Play
+                if !is_tv {
                     thread::sleep(Duration::from_millis(150));
                     let home_url = format!("http://{}:8060/keypress/Home", ip);
                     let _ = c.post(&home_url).send();
@@ -878,18 +916,18 @@ impl RokuRemoteApp {
             for delay in [600, 1000, 1600] {
                 thread::sleep(Duration::from_millis(delay));
                 update_device_name_worker(&ip, &tx, &ctx);
+                update_active_app_worker(&ip, &tx, &ctx);
                 update_media_player_worker(&ip, &tx, &ctx);
             }
         });
     }
 
     pub fn power_off(&mut self) {
-        self.tv_powered_on.store(false, Ordering::Relaxed);
+        self.set_tv_power_state(false);
         if self.device_details.is_tv {
             self.device_details.power_mode = "PowerOff".to_string();
         }
         let ip = self.selected_device_ip.clone();
-        let is_tv = self.device_details.is_tv;
         let tx = self.tx.clone();
         let ctx = self.ctx.clone();
 
@@ -899,44 +937,31 @@ impl RokuRemoteApp {
                 .build();
 
             if let Ok(ref c) = client {
-                if is_tv {
-                    let url = format!("http://{}:8060/keypress/PowerOff", ip);
-                    let mut sent = false;
-                    if let Ok(resp) = c.post(&url).send() {
-                        if resp.status().is_success() {
-                            sent = true;
-                        }
+                // Attempt discrete PowerOff first
+                let poweroff_url = format!("http://{}:8060/keypress/PowerOff", ip);
+                let mut sent = false;
+                if let Ok(resp) = c.post(&poweroff_url).send() {
+                    if resp.status().is_success() {
+                        sent = true;
                     }
-                    if !sent {
-                        let fallback_url = format!("http://{}:8060/keypress/Power", ip);
-                        let _ = c.post(&fallback_url).send();
-                    }
-                } else {
-                    // For streaming sticks: sending Power transmits HDMI-CEC Standby to the TV
-                    let power_url = format!("http://{}:8060/keypress/Power", ip);
-                    let _ = c.post(&power_url).send();
+                }
+                if !sent {
+                    let fallback_url = format!("http://{}:8060/keypress/Power", ip);
+                    let _ = c.post(&fallback_url).send();
                 }
             }
 
             for delay in [600, 1000, 1600] {
                 thread::sleep(Duration::from_millis(delay));
                 update_device_name_worker(&ip, &tx, &ctx);
+                update_active_app_worker(&ip, &tx, &ctx);
                 update_media_player_worker(&ip, &tx, &ctx);
             }
         });
     }
 
     pub fn toggle_power(&mut self) {
-        let is_currently_on = if !self.is_device_reachable {
-            false
-        } else if self.device_details.is_tv {
-            self.device_details.power_mode != "PowerOff"
-                && self.device_details.power_mode != "Standby"
-        } else {
-            self.tv_powered_on.load(Ordering::Relaxed)
-        };
-
-        if is_currently_on {
+        if self.is_system_powered_on() {
             self.power_off();
         } else {
             self.power_on();
@@ -944,7 +969,7 @@ impl RokuRemoteApp {
     }
 
     pub fn launch_app(&self, app_id: String) {
-        self.tv_powered_on.store(true, Ordering::Relaxed);
+        self.set_tv_power_state(true);
         let ip = self.selected_device_ip.clone();
         let tx = self.tx.clone();
         let ctx = self.ctx.clone();
@@ -1046,7 +1071,18 @@ impl RokuRemoteApp {
                     }
                 }
                 BackgroundMessage::ActiveAppUpdated(app) => {
+                    if app.eq_ignore_ascii_case("power saver") {
+                        self.set_tv_power_state(false);
+                    }
                     self.active_app = app;
+                }
+                BackgroundMessage::ScreensaverUpdated(ssvr) => {
+                    if let Some(ref name) = ssvr {
+                        if !name.is_empty() {
+                            self.set_tv_power_state(false);
+                        }
+                    }
+                    self.active_screensaver = ssvr;
                 }
                 BackgroundMessage::AppsListUpdated(apps) => {
                     self.is_refreshing_apps = false;
@@ -1079,7 +1115,7 @@ impl RokuRemoteApp {
                 }
                 BackgroundMessage::MediaPlayerUpdated(info) => {
                     if info.state == "play" {
-                        self.tv_powered_on.store(true, Ordering::Relaxed);
+                        self.set_tv_power_state(true);
                     }
                     // Continually update playback state & position without overwriting snapshot stats
                     self.media_player.state = info.state;
@@ -1113,10 +1149,11 @@ impl RokuRemoteApp {
                     } else if self.apps.is_empty() && self.is_device_reachable && !self.is_refreshing_apps {
                         self.refresh_apps();
                     }
-                    if details.is_tv {
-                        self.tv_powered_on.store(details.power_mode != "PowerOff" && details.power_mode != "Standby", Ordering::Relaxed);
-                    } else if details.power_mode == "PowerOff" || details.power_mode == "Standby" {
-                        self.tv_powered_on.store(false, Ordering::Relaxed);
+                    let pm = details.power_mode.to_lowercase();
+                    if pm == "poweroff" || pm == "standby" || pm == "displayoff" || pm == "ready" || pm == "suspend" {
+                        self.set_tv_power_state(false);
+                    } else if details.is_tv && pm == "poweron" {
+                        self.set_tv_power_state(true);
                     }
                     self.device_details = details;
                 }
@@ -1128,10 +1165,19 @@ impl RokuRemoteApp {
                     self.device_stats.last_updated = Some(Instant::now());
 
                     if let Some(details) = device_details {
+                        let pm = details.power_mode.to_lowercase();
+                        if pm == "poweroff" || pm == "standby" || pm == "displayoff" || pm == "ready" || pm == "suspend" {
+                            self.set_tv_power_state(false);
+                        } else if details.is_tv && pm == "poweron" {
+                            self.set_tv_power_state(true);
+                        }
                         self.device_details = details;
                     }
 
                     if let Some(mp) = media_player {
+                        if mp.state == "play" {
+                            self.set_tv_power_state(true);
+                        }
                         self.media_player = mp;
                     }
                 }
@@ -1140,8 +1186,6 @@ impl RokuRemoteApp {
                     self.is_device_reachable = reachable;
                     if !reachable {
                         self.tv_powered_on.store(false, Ordering::Relaxed);
-                    } else if !was_reachable {
-                        self.tv_powered_on.store(true, Ordering::Relaxed);
                     }
                     if !was_reachable && reachable && self.apps.is_empty() && !self.is_refreshing_apps {
                         let is_limited = self.device_details.ecp_setting_mode.eq_ignore_ascii_case("limited")
@@ -1655,10 +1699,13 @@ impl RokuRemoteApp {
                                 "Offline"
                             };
                             row("Device Status:", dev_status);
-                            let tv_status = if self.tv_powered_on.load(Ordering::Relaxed) {
+                            let is_on = self.is_system_powered_on();
+                            let tv_status = if is_on {
                                 "On"
+                            } else if self.active_screensaver.is_some() || self.active_app.eq_ignore_ascii_case("power saver") {
+                                "Suspended (Screensaver / Standby)"
                             } else {
-                                "Off"
+                                "Off / Standby"
                             };
                             row("TV Status:", tv_status);
                         }
@@ -2606,10 +2653,13 @@ impl eframe::App for RokuRemoteApp {
                                         "Offline"
                                     };
                                     row("Device Status:", dev_status);
-                                    let tv_status = if self.tv_powered_on.load(Ordering::Relaxed) {
+                                    let is_on = self.is_system_powered_on();
+                                    let tv_status = if is_on {
                                         "On"
+                                    } else if self.active_screensaver.is_some() || self.active_app.eq_ignore_ascii_case("power saver") {
+                                        "Suspended (Screensaver / Standby)"
                                     } else {
-                                        "Off"
+                                        "Off / Standby"
                                     };
                                     row("TV Status:", tv_status);
                                 }
@@ -2947,26 +2997,16 @@ impl eframe::App for RokuRemoteApp {
             let total_width = ui.available_width();
             let is_wide = total_width >= 680.0;
 
-            let is_powered_on = if !self.is_device_reachable {
-                false
-            } else if self.device_details.is_tv {
-                match self.device_details.power_mode.as_str() {
-                    "PowerOn" => true,
-                    "DisplayOff" | "Headless" => true,
-                    "PowerOff" | "Standby" => false,
-                    _ => self.is_device_reachable,
-                }
-            } else {
-                // For streaming sticks / players: if the television is off, consider Roku as being off
-                self.tv_powered_on.load(Ordering::Relaxed)
-            };
+            let is_powered_on = self.is_system_powered_on();
 
             let (power_icon_color, power_status_label) = if !self.is_device_reachable {
                 (egui::Color32::from_rgb(220, 60, 50), "Offline")
             } else if is_powered_on {
                 (egui::Color32::from_rgb(46, 204, 113), "On")
+            } else if self.active_screensaver.is_some() || self.active_app.eq_ignore_ascii_case("power saver") {
+                (egui::Color32::from_rgb(230, 160, 30), "Suspended")
             } else {
-                (egui::Color32::from_rgb(220, 60, 50), "Off")
+                (egui::Color32::from_rgb(220, 60, 50), "Standby")
             };
 
             let state_icon = match self.media_player.state.as_str() {
@@ -2998,14 +3038,20 @@ impl eframe::App for RokuRemoteApp {
                             .color(self.theme.dark_foreground),
                     );
 
-                    let (badge_rect, _) = ui.allocate_exact_size(egui::vec2(13.0, 14.0), egui::Sense::hover());
+                    let (badge_rect, badge_response) = ui.allocate_exact_size(egui::vec2(13.0, 14.0), egui::Sense::click());
                     draw_power_icon(ui.painter(), badge_rect.center(), 4.5, power_icon_color, 1.6);
-                    ui.label(
-                        egui::RichText::new(power_status_label)
-                            .size(11.5)
-                            .strong()
-                            .color(power_icon_color),
+                    let label_response = ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(power_status_label)
+                                .size(11.5)
+                                .strong()
+                                .color(power_icon_color),
+                        ).sense(egui::Sense::click())
                     );
+                    let badge_tip = "TV Power Status (Click to manually sync state without sending CEC command)";
+                    if badge_response.on_hover_text(badge_tip).clicked() || label_response.on_hover_text(badge_tip).clicked() {
+                        self.set_tv_power_state(!is_powered_on);
+                    }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(4.0);
@@ -3171,14 +3217,20 @@ impl eframe::App for RokuRemoteApp {
                             .color(self.theme.foreground),
                     );
 
-                    let (badge_rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 12.0), egui::Sense::hover());
+                    let (badge_rect, badge_response) = ui.allocate_exact_size(egui::vec2(10.0, 12.0), egui::Sense::click());
                     draw_power_icon(ui.painter(), badge_rect.center(), 3.8, power_icon_color, 1.4);
-                    ui.label(
-                        egui::RichText::new(power_status_label)
-                            .size(10.5)
-                            .strong()
-                            .color(power_icon_color),
+                    let label_response = ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(power_status_label)
+                                .size(10.5)
+                                .strong()
+                                .color(power_icon_color),
+                        ).sense(egui::Sense::click())
                     );
+                    let badge_tip = "TV Power Status (Click to manually sync state without sending CEC command)";
+                    if badge_response.on_hover_text(badge_tip).clicked() || label_response.on_hover_text(badge_tip).clicked() {
+                        self.set_tv_power_state(!is_powered_on);
+                    }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(4.0);

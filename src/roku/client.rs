@@ -8,7 +8,7 @@ use crate::models::{BackgroundMessage, RokuDevice};
 use crate::roku::parser::{
     clean_html_entities, parse_active_app_xml, parse_apps_xml,
     parse_device_details_xml, parse_device_name_xml,
-    parse_media_player_xml,
+    parse_media_player_xml, parse_screensaver_xml,
 };
 
 fn get_local_subnet_base() -> Option<(u8, u8, u8)> {
@@ -159,10 +159,28 @@ pub fn update_media_player_worker(ip: &str, tx: &Sender<BackgroundMessage>, ctx:
 }
 
 pub fn get_icon_cache_dir() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
     let cache_dir = std::path::PathBuf::from(home).join(".cache/roku-remote-rs/icons");
     let _ = std::fs::create_dir_all(&cache_dir);
     cache_dir
+}
+
+pub fn load_cached_tv_power_state() -> Option<bool> {
+    let cache_file = get_icon_cache_dir().join("tv_power_state.txt");
+    std::fs::read_to_string(cache_file)
+        .ok()
+        .and_then(|s| match s.trim().to_lowercase().as_str() {
+            "true" | "1" | "on" => Some(true),
+            "false" | "0" | "off" => Some(false),
+            _ => None,
+        })
+}
+
+pub fn save_cached_tv_power_state(is_on: bool) {
+    let cache_file = get_icon_cache_dir().join("tv_power_state.txt");
+    let _ = std::fs::write(cache_file, if is_on { "true" } else { "false" });
 }
 
 pub fn load_app_icon_worker(ip: &str, app_id: &str, tx: &Sender<BackgroundMessage>, ctx: &egui::Context) {
@@ -227,8 +245,10 @@ pub fn update_active_app_worker(ip: &str, tx: &Sender<BackgroundMessage>, ctx: &
                 if let Some(app_name) = parse_active_app_xml(&text) {
                     let cleaned = clean_html_entities(&app_name);
                     let _ = tx.send(BackgroundMessage::ActiveAppUpdated(cleaned));
-                    ctx.request_repaint();
                 }
+                let ssvr = parse_screensaver_xml(&text);
+                let _ = tx.send(BackgroundMessage::ScreensaverUpdated(ssvr));
+                ctx.request_repaint();
             }
         }
     }
@@ -254,81 +274,62 @@ pub fn save_cached_apps(apps: &[crate::models::AppItem]) {
 pub fn load_cached_apps() -> Option<Vec<crate::models::AppItem>> {
     let cache_file = get_icon_cache_dir().join("apps_cache.json");
     let content = std::fs::read_to_string(cache_file).ok()?;
-    let mut items = Vec::new();
-    let mut rest = content.as_str();
-    while let Some(start) = rest.find("{\"id\": \"") {
-        let after_id = &rest[start + 8..];
-        if let Some(id_end) = after_id.find('"') {
-            let id = after_id[..id_end].to_string();
-            if let Some(name_start) = after_id[id_end..].find("\"name\": \"") {
-                let after_name = &after_id[id_end + name_start + 9..];
-                if let Some(name_end) = after_name.find('"') {
-                    let name = after_name[..name_end].to_string();
-                    items.push(crate::models::AppItem { id, name });
-                    rest = &after_name[name_end + 1..];
-                    continue;
-                }
-            }
-        }
-        break;
-    }
-    if !items.is_empty() {
-        Some(items)
-    } else {
-        None
-    }
-}
+    let mut apps = Vec::new();
 
-pub fn update_apps_worker(ip: &str, tx: &Sender<BackgroundMessage>, ctx: &egui::Context) {
-    let url = format!("http://{}:8060/query/apps", ip);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_millis(1500))
-        .build();
-    let mut sent = false;
-    if let Ok(c) = client {
-        if let Ok(resp) = c.get(&url).send() {
-            if resp.status().is_success() {
-                if let Ok(text) = resp.text() {
-                    let parsed = parse_apps_xml(&text);
-                    if !parsed.is_empty() {
-                        let _ = tx.send(BackgroundMessage::AppsListUpdated(parsed));
-                        ctx.request_repaint();
-                        sent = true;
-                    }
+    // Simple robust JSON parser for app array
+    for line in content.lines() {
+        if let (Some(id_start), Some(name_start)) = (line.find("\"id\": \""), line.find("\"name\": \"")) {
+            let id_val = &line[id_start + 7..];
+            if let Some(id_end) = id_val.find('"') {
+                let id = id_val[..id_end].to_string();
+                let name_val = &line[name_start + 9..];
+                if let Some(name_end) = name_val.find('"') {
+                    let name = name_val[..name_end].to_string();
+                    apps.push(crate::models::AppItem { id, name });
                 }
             }
         }
     }
-    if !sent {
-        let _ = tx.send(BackgroundMessage::AppsRefreshFailed);
-        ctx.request_repaint();
+
+    if apps.is_empty() {
+        None
+    } else {
+        Some(apps)
     }
 }
 
 pub fn refresh_apps_worker(ip: &str, tx: &Sender<BackgroundMessage>, ctx: &egui::Context) {
+    if ip.is_empty() {
+        let _ = tx.send(BackgroundMessage::AppsRefreshFailed);
+        return;
+    }
     let url = format!("http://{}:8060/query/apps", ip);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_millis(2000))
-        .build();
-    let mut sent = false;
-    if let Ok(c) = client {
-        if let Ok(resp) = c.get(&url).send() {
-            if resp.status().is_success() {
-                if let Ok(text) = resp.text() {
-                    let parsed = parse_apps_xml(&text);
-                    if !parsed.is_empty() {
-                        let _ = tx.send(BackgroundMessage::AppsListRefreshed(parsed));
-                        ctx.request_repaint();
-                        sent = true;
-                    }
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_millis(2500))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => {
+            let _ = tx.send(BackgroundMessage::AppsRefreshFailed);
+            return;
+        }
+    };
+
+    if let Ok(resp) = client.get(&url).send() {
+        if resp.status().is_success() {
+            if let Ok(text) = resp.text() {
+                let apps = parse_apps_xml(&text);
+                if !apps.is_empty() {
+                    save_cached_apps(&apps);
+                    let _ = tx.send(BackgroundMessage::AppsListRefreshed(apps));
+                    ctx.request_repaint();
+                    return;
                 }
             }
         }
     }
-    if !sent {
-        let _ = tx.send(BackgroundMessage::AppsRefreshFailed);
-        ctx.request_repaint();
-    }
+    let _ = tx.send(BackgroundMessage::AppsRefreshFailed);
+    ctx.request_repaint();
 }
 
 pub fn load_cached_last_ip() -> Option<String> {
@@ -434,5 +435,3 @@ mod tests {
         assert_eq!(encode_char_for_lit('ñ'), "Lit_%C3%B1");
     }
 }
-
-

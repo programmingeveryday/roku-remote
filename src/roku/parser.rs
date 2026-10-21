@@ -13,7 +13,22 @@ pub fn parse_active_app_xml(xml: &str) -> Option<String> {
         if let Some(tag_end) = xml[start..].find('>') {
             let content_start = start + tag_end + 1;
             if let Some(close) = xml[content_start..].find("</app>") {
-                return Some(xml[content_start..content_start + close].trim().to_string());
+                return Some(clean_html_entities(xml[content_start..content_start + close].trim()));
+            }
+        }
+    }
+    None
+}
+
+pub fn parse_screensaver_xml(xml: &str) -> Option<String> {
+    if let Some(start) = xml.find("<screensaver") {
+        if let Some(tag_end) = xml[start..].find('>') {
+            let content_start = start + tag_end + 1;
+            if let Some(close) = xml[content_start..].find("</screensaver>") {
+                let name = xml[content_start..content_start + close].trim();
+                if !name.is_empty() {
+                    return Some(clean_html_entities(name));
+                }
             }
         }
     }
@@ -62,7 +77,9 @@ pub fn parse_device_details_xml(xml: &str) -> DeviceDetails {
         user_location: extract("user-device-location"),
         ecp_setting_mode: extract("ecp-setting-mode"),
         is_tv: extract("is-tv").eq_ignore_ascii_case("true"),
+        is_stick: extract("is-stick").eq_ignore_ascii_case("true"),
         is_powered_by_tv: extract("is-powered-by-tv").eq_ignore_ascii_case("true"),
+        supports_suspend: extract("supports-suspend").eq_ignore_ascii_case("true"),
         uptime_seconds: extract("uptime").parse::<u64>().unwrap_or(0),
         wifi_driver: extract("wifi-driver"),
         has_wifi_5g: extract("has-wifi-5G-support").eq_ignore_ascii_case("true"),
@@ -272,6 +289,15 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_screensaver_xml() {
+        let sample = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?><active-app><app>Roku</app><screensaver id=\"55545\" type=\"ssvr\" version=\"2.0.1\">Default screensaver</screensaver></active-app>";
+        assert_eq!(parse_screensaver_xml(sample), Some("Default screensaver".to_string()));
+
+        let without_ssvr = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?><active-app><app id=\"837\">YouTube</app></active-app>";
+        assert_eq!(parse_screensaver_xml(without_ssvr), None);
+    }
+
+    #[test]
     fn test_parse_device_name_xml() {
         let xml_user = "<device-info><user-device-name>Living Room TV</user-device-name></device-info>";
         assert_eq!(parse_device_name_xml(xml_user), Some("Living Room TV".to_string()));
@@ -327,7 +353,7 @@ mod tests {
 
     #[test]
     fn test_parse_device_details_xml() {
-        let sample = "<device-info><model-name>Roku Stick</model-name><model-number>3830R</model-number><software-version>15.3.4</software-version><network-name>HomeWi-Fi</network-name><power-mode>PowerOn</power-mode><ui-resolution>1080p</ui-resolution><user-device-location>Living room</user-device-location><ecp-setting-mode>limited</ecp-setting-mode><time-zone-name>US/Pacific</time-zone-name><supports-private-listening>true</supports-private-listening><supports-airplay>true</supports-airplay><supports-ethernet>false</supports-ethernet></device-info>";
+        let sample = "<device-info><model-name>Roku Stick</model-name><model-number>3830R</model-number><software-version>15.3.4</software-version><network-name>HomeWi-Fi</network-name><power-mode>PowerOn</power-mode><ui-resolution>1080p</ui-resolution><user-device-location>Living room</user-device-location><ecp-setting-mode>limited</ecp-setting-mode><time-zone-name>US/Pacific</time-zone-name><supports-private-listening>true</supports-private-listening><supports-airplay>true</supports-airplay><supports-ethernet>false</supports-ethernet><supports-suspend>false</supports-suspend><is-stick>true</is-stick></device-info>";
         let details = parse_device_details_xml(sample);
         assert_eq!(details.model_name, "Roku Stick");
         assert_eq!(details.model_number, "3830R");
@@ -338,6 +364,8 @@ mod tests {
         assert_eq!(details.user_location, "Living room");
         assert_eq!(details.ecp_setting_mode, "limited");
         assert_eq!(details.is_tv, false);
+        assert_eq!(details.is_stick, true);
+        assert_eq!(details.supports_suspend, false);
         assert_eq!(details.time_zone, "US/Pacific");
         assert_eq!(details.supports_private_listening, true);
         assert_eq!(details.supports_airplay, true);
