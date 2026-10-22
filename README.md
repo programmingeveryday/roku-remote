@@ -11,13 +11,16 @@ A modern, fast, lightweight, and cross-platform native desktop remote control fo
 - **Multi-Device Discovery & Selector**: Automatically discovers all Roku devices on your local Wi-Fi / LAN via SSDP UDP multicast and parallel multi-threaded subnet probes. Includes an interactive dropdown selector to switch between multiple Rokus across different rooms, as well as a manual IP entry mode.
 - **One-Click Refresh with Live Spinner Feedback**: Dedicated **`🔄`** refresh button right beside the device selector that triggers network discovery, polls media playback state, queries active applications, and refreshes installed channel inventory with animated spinner feedback.
 - **In-App Setup Guide & Permission Alerts**: Built-in interactive setup guide modal (`⚙ Setup`) with guidance for HDMI-CEC setup and automatic warning banners if a Roku's Mobile App Control is in "Limited" mode.
-- **Smart Power Control & HDMI-CEC 1-Touch Play**:
-  - Unified single-button power toggle (`Power Off` in red / `Power On` in green) reflecting TV and display status.
-  - Automatically sends HDMI-CEC 1-Touch Play sequences (`Home` + `Power`) on power up so Roku Streaming Sticks wake connected televisions and switch to the correct HDMI input seamlessly.
+- **Smart Power Control, Samsung TV Screen Detection & HDMI-CEC 1-Touch Play**:
+  - Unified single-button power toggle (`Power Off` in red / `Power On` in green) and header status badge (`On` / `Standby` / `Offline`) reflecting true physical TV display status.
+  - **Live TV Screen Power Polling**: Queries native Roku TV `<power-mode>` as well as connected **Samsung Smart TVs** over the local network (`:8001/api/v2/` `"PowerState": "on"` vs `"standby"`) so wall-powered Roku Streaming Sticks accurately report whether the television display is On or Off—even when toggled with the physical TV remote.
+  - Automatically sends HDMI-CEC 1-Touch Play sequences (`PowerOn` / `Power` + `Home`) on power up so Roku Streaming Sticks wake connected televisions and switch to the correct HDMI input seamlessly.
   - Independently monitors device connectivity (`Online` status in Device Details).
 - **Full Navigation D-Pad**: Vector-rendered arrow keys (`▲`, `▼`, `◄`, `►`), `OK / Select`, `Home`, `Back`, `Instant Replay`, and `Options / Info (*)`.
 - **Media & Volume Control**: Dedicated playback row (`<<`, `Play / Pause`, `>>`), `Volume Up`, `Volume Down`, and `Mute`.
-- **Live Playback State & Dynamic Play/Pause Button**: Real-time status indicator (`▶ Playing`, `⏸ Paused`, `⏳ Buffering`) paired with a context-aware Play/Pause button that dynamically changes label and color (green for playing, amber for paused).
+- **Live Playback Progress Card & Dynamic Play/Pause Button**:
+  - Smoothly animated Now Playing progress card above the D-pad displaying active channel, live elapsed/remaining time, percentage progress bar (or sweeping pulse for unmetered streams like YouTube), and one-click access to full stream telemetry.
+  - Context-aware Play/Pause button that dynamically changes label and color (green for playing, amber for paused).
 - **True Sleep State & Zero Idle Overhead**:
   - Automatically enters deep sleep mode when minimized (instant), unfocused (3s), or idle (10s), stopping all background network queries and file polling (0% CPU, 0 network requests).
   - Wakes up instantly on user interaction and updates status.
@@ -50,19 +53,17 @@ A modern, fast, lightweight, and cross-platform native desktop remote control fo
 - **Omarchy / System Desktop Theme Integration**:
   - Automatically detects and matches Omarchy system themes (`colors.toml`) with live hot-reloading.
 - **Device Details & Telemetry View**:
-  - Inspect model name, model number, serial number, software version, Wi-Fi network & driver, UI resolution, power mode, IP address, and live/sleeping App Status.
+  - Inspect model name, model number, location, software version, Wi-Fi network, UI resolution, power mode, TV status, IP address, and live/sleeping App Status.
   - Responsive full-width card layout with multi-line formatted MAC addresses to prevent horizontal clipping in narrow windows.
 - **Device & Stream Statistics Dashboard (`📊 Stats`)**:
-  - Accessible directly under Device Details (`[ 📊 Stats ]`) or via global shortcut **`Ctrl + S`**, available in both wide modal and compact narrow views.
+  - Accessible directly under Device Details (`[ 📊 Stats ]`), by clicking the playback progress bar, or via global shortcut **`Ctrl + S`**, available in both wide modal and compact narrow views.
   - **Uniform-Width Clean Layout**: Balanced, full-width cards with two-column aligned metrics, clean spacing, and zero text collisions.
-  - **Device & Application State**: Displays device model, serial number, friendly name, running channel, media state, and playback position (`MM:SS / MM:SS`).
-  - **Network & Connectivity Diagnostics**: Network type, Wi-Fi signal strength (`Excellent`, `Good`), channel, gateway, IP address, and multi-line Wi-Fi and Bluetooth MAC addresses.
-  - **Display & Audio Profile**: UI resolution, TV panel resolution, power status, and audio output mode.
-  - **Active Stream Telemetry**: Real-time stream format, video bitrate / bandwidth, audio format, and buffering progress during active playback.
-  - **Persistent Refresh Button with Animated Status**: One-click **`🔄 Refresh Stats`** button with animated dots (`Refreshing...`) that stays visible in a disabled state during updates before automatically re-enabling.
-  - **Optimized On-Demand Polling**: Gathers an instant diagnostic snapshot on demand without continuous network overhead, only tracking live media playback position while active.
+  - **Device & Application State**: Displays target device, running channel, playback state, and live stream indicator.
+  - **Live Media Stream Telemetry**: Real-time stream bandwidth, video bitrate, stream resolution, video/audio codecs, container protocol, buffer health, playback progress, captions, and DRM protection using a multi-sample polling algorithm.
+  - **Hardware & System Diagnostics**: System uptime, power source (USB vs AC adapter), Wi-Fi hardware & 5GHz support, audio features (Private Listening, AirPlay), time zone, MAC addresses, and OS build.
+  - **Persistent Refresh Button with Animated Status**: One-click **`🔄 Refresh`** button with animated dots (`Refreshing...`) that stays visible in a disabled state during updates before automatically re-enabling.
 - **Modular & Idiomatic Rust Architecture**:
-  - Refactored into clean modules (`app`, `models`, `roku::client`, `roku::parser`, `theme`) with 100% unit test coverage for XML parsers and color utilities.
+  - Refactored into clean modules (`app`, `models`, `roku::client`, `roku::parser`, `theme`) with unit test coverage for XML parsers, TV power state parsing, URL literal encoding, and color utilities.
 
 ---
 
@@ -120,17 +121,17 @@ For this remote control (or any external app) to communicate with your Roku devi
 1. Turn on your Roku device / TV.
 2. Go to **Settings** → **System** → **Advanced system settings**.
 3. Select **Control by mobile apps** → **Network access**.
-4. Set it to **Default** or **Permissive** (do **not** leave it on *Disabled*).
+4. Set it to **Default** or **Permissive** (do **not** leave it on *Disabled* or *Limited*).
 5. Ensure your computer and your Roku device are connected to the **same local Wi-Fi / LAN network**.
 
-> **Note:** Roku devices communicate via HTTP and SSDP over port `8060`. If the network access setting is Disabled, the Roku will block button presses and app launch requests.
+> **Note:** Roku devices communicate via HTTP and SSDP over port `8060`. If the network access setting is Disabled or Limited, the Roku will block button presses and app launch requests.
 
 ### 📺 TV Power Control via Roku (HDMI-CEC 1-Touch Play)
 
 If using a **Roku Streaming Stick** plugged into an external TV:
 1. **On your Roku**: Navigate to **Settings** → **System** → **Control other devices (CEC)** → Check **1-touch play**.
 2. **On your TV**: Ensure HDMI-CEC is enabled in your TV's settings menu (often named *Anynet+* on Samsung, *Bravia Sync* on Sony, *SimpLink* on LG, or *CEC*).
-3. When you click **`Power On`**, Roku Remote issues an HDMI-CEC 1-Touch Play wake command (`Home` + `Power`), turning on the television screen and automatically switching to the Roku's HDMI input.
+3. When you click **`Power On`**, Roku Remote issues an HDMI-CEC 1-Touch Play wake command (`PowerOn`/`Power` + `Home`), turning on the television screen and automatically switching to the Roku's HDMI input.
 
 ---
 
